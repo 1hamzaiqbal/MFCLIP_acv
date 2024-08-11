@@ -1,0 +1,5 @@
+pets:
+  name: 'pets'
+  num_classes: 37
+  train: '/mnt/dataset/pets/train'
+  test: '/mnt/dataset/pets/test'
