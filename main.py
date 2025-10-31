@@ -65,7 +65,7 @@ class AdversarialTrainer:
             self.num_iter = 1
 
         ##HL Addition: toggle for swithcing between crossentropy loss and bcewithlogits loss (for sigmoid-based losses##
-        self.use_bcewithlogits = False if args.head.lower() not in ["sigliploss", "arcfacesigmoid"] else True
+        self.use_bcewithlogits = False if args.head.lower() not in ["sigliphead", "arcfacesigmoid"] else True
 
     def ensure_dir(self):
         for file_path in [self.surrogate_path, self.target_path, self.adv_path]:
@@ -165,7 +165,7 @@ class AdversarialTrainer:
                 outputs = model(images)
 
             ##HL addition: need to one-hot encode labels for bcewithlogits loss##
-            
+
             if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
                 # Convert integer labels → one-hot for BCE
                 labels_onehot = F.one_hot(labels, num_classes=outputs.size(1)).float()
@@ -177,6 +177,7 @@ class AdversarialTrainer:
             # loss = self.criterion(outputs, labels)
 
             ##end HL addition##
+
             loss.backward()
             self.optimizer.step()
 
