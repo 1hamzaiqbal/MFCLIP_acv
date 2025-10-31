@@ -64,6 +64,9 @@ class AdversarialTrainer:
         if args.attack == 'FGSM':
             self.num_iter = 1
 
+        ##HL Addition: toggle for swithcing between crossentropy loss and bcewithlogits loss (for sigmoid-based losses##
+        self.use_bcewithlogits = False if args.head.lower() not in ["sigliploss", "arcfacesigmoid"] else True
+
     def ensure_dir(self):
         for file_path in [self.surrogate_path, self.target_path, self.adv_path]:
             directory = os.path.dirname(file_path)
@@ -76,7 +79,6 @@ class AdversarialTrainer:
         config['num_classes'] = self.trainer.dm.num_classes
         config['output_dim'] = 1024
         head_factory = HeadFactory(args.head, config)
-        print(f"setup surrogate head: {head_factory.__class__}")
         backbone = self.trainer.clip_model.visual
         backbone = self.wrap_model(backbone)
         self.surrogate = Model(backbone, head_factory).to(self.device)
@@ -112,7 +114,12 @@ class AdversarialTrainer:
         #     eta_min=1e-6
         # )
         self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=int(num_epoch/2), T_mult=1)
-        self.criterion = nn.CrossEntropyLoss().to(self.device)
+        if self.use_bcewithlogits:
+            print("Using BCEWithLogitsLoss for Sigmoid-based head.")
+            self.criterion = nn.BCEWithLogitsLoss().to(self.device)
+        else:
+            print("Using CrossEntropyLoss for Softmax-based head.")
+            self.criterion = nn.CrossEntropyLoss().to(self.device)
 
     def wrap_model(self, model):
         normalize = transforms.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])

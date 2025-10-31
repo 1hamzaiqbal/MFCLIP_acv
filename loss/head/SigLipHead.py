@@ -25,12 +25,4 @@ class SigLipHead(nn.Module):
         logits = torch.mm(feats, weights) / self.temperature
         logits = logits * self.scale  # optional scaling for stability
 
-        # If labels are given, compute BCE targets (multi-class sigmoid)
-        if labels is not None:
-            target = F.one_hot(labels, num_classes=logits.size(1)).float()
-            # BCEWithLogitsLoss expects logits, not sigmoid outputs
-            loss = F.binary_cross_entropy_with_logits(logits, target)
-            return logits, loss
-        else:
-            # If called without labels, just return logits (inference mode)
-            return logits
+        return logits
