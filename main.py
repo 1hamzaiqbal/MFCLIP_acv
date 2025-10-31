@@ -82,6 +82,11 @@ class AdversarialTrainer:
         backbone = self.trainer.clip_model.visual
         backbone = self.wrap_model(backbone)
         self.surrogate = Model(backbone, head_factory).to(self.device)
+        print(f"model architecture: \n\n {self.surrogate} \n\n")
+        print("Trainable parameters:")
+        for name, param in self.surrogate.named_parameters():
+            if param.requires_grad:
+                print(f"{name} | shape: {tuple(param.shape)}")
 
     def setup_target(self, name='rn18'):
         num_classes = self.trainer.dm.num_classes
@@ -130,6 +135,14 @@ class AdversarialTrainer:
 
     def finetune(self, num_epoch):
         loader = self.mf_loader
+
+        ##TODO: also implement resume training for optimizer and scheduler states
+        ##HL Addition: need to implement resume training logic since authors have this flag set but no implementation##
+        if args.resume and len(args.resume)>0 and os.path.exists(args.resume):
+            print(f"Resuming from checkpoint: {args.resume}")
+            self.load_model(self.surrogate, args.resume)
+        ##End##
+        
         self.setup_optimization(model=self.surrogate, num_epoch=num_epoch, optimizer=args.optimizer, lr=args.lr)
         for epoch in range(num_epoch):
             train_acc = Accuracy()
