@@ -8,10 +8,11 @@ class ArcFaceSigmoid(nn.Module):
     Sigmoid variant of ArcFace (Additive Angular Margin Loss)
     Inspired by SigLIP + ArcFace.
     Output logits suitable for BCEWithLogitsLoss.
+    Note: really this is a classifier head with a learned weight parameter.
     """
     def __init__(self, feat_dim, num_class, margin_arc=0.35, margin_am=0.0, scale=32):
         super(ArcFaceSigmoid, self).__init__()
-        self.weight = nn.Parameter(torch.FloatTensor(feat_dim, num_class))
+        self.weight = nn.Parameter(torch.FloatTensor(feat_dim, num_class)) #these weights are for classifier wieghts, for the classification heads
         nn.init.xavier_uniform_(self.weight)
         self.margin_arc = margin_arc
         self.margin_am = margin_am

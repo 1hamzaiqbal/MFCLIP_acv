@@ -21,7 +21,7 @@ from loss.head.SST_Prototype import SST_Prototype
 from loss.head.ArcNegFace import ArcNegFace
 from loss.head.MagFace import MagFace
 from loss.head.ArcFaceSigmoid import ArcFaceSigmoid
-from loss.head.SigLipLoss import SigLipLoss
+from loss.head.SigLipHead import SigLIPHead
 
 
 class HeadFactory:
@@ -132,11 +132,12 @@ class HeadFactory:
             scale = self.head_param['scale']
             head = ArcFaceSigmoid(feat_dim=feat_dim, num_class=num_class, margin_arc=margin_arc, margin_am=margin_am, scale=scale)
         
-        elif self.head_type == 'SigLipLoss':
+        elif self.head_type == 'SigLipHead':
             feat_dim = self.head_param['feat_dim']
             num_class = self.head_param['num_class']
+            scale = self.head_param['scale']
             temperature = self.head_param['temperature']
-            head = SigLipLoss(feat_dim=feat_dim, num_class=num_class, temperature=temperature)
+            head = SigLIPHead(feat_dim=feat_dim, num_class=num_class, scale=scale, temperature=temperature)
             
         else:
             pass

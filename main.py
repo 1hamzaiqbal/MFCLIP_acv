@@ -76,6 +76,7 @@ class AdversarialTrainer:
         config['num_classes'] = self.trainer.dm.num_classes
         config['output_dim'] = 1024
         head_factory = HeadFactory(args.head, config)
+        print(f"setup surrogate head: {head_factory.__class__}")
         backbone = self.trainer.clip_model.visual
         backbone = self.wrap_model(backbone)
         self.surrogate = Model(backbone, head_factory).to(self.device)
