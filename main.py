@@ -8,6 +8,7 @@ from dass.engine import build_trainer
 import torch.optim as optim
 from loss.head.head_def import HeadFactory
 import yaml
+from ruamel.yaml import YAML
 import torchvision.transforms as transforms
 from ignite.metrics import Accuracy
 import foolbox as fb
@@ -70,7 +71,8 @@ class AdversarialTrainer:
                 os.makedirs(directory)
 
     def setup_surrogate(self):
-        config = yaml.load(open('configs/data.yaml', 'r'), Loader=yaml.Loader)
+        yaml = YAML(typ='safe')
+        config = yaml.load(open('configs/data.yaml', 'r'))
         config['num_classes'] = self.trainer.dm.num_classes
         config['output_dim'] = 1024
         head_factory = HeadFactory(args.head, config)
