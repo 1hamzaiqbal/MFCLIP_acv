@@ -132,7 +132,7 @@ class HeadFactory:
             scale = self.head_param['scale']
             head = ArcFaceSigmoid(feat_dim=feat_dim, num_class=num_class, margin_arc=margin_arc, margin_am=margin_am, scale=scale)
         
-        elif self.head_type == 'SigLipHead':
+        elif self.head_type == 'SigLIPHead':
             feat_dim = self.head_param['feat_dim']
             num_class = self.head_param['num_class']
             scale = self.head_param['scale']
