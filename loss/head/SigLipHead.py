@@ -3,14 +3,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SigLIPHead(nn.Module):
+class SigLipHead(nn.Module):
     """
     Sigmoid (SigLIP-style) head in ArcFace/AM-Softmax format.
     Takes normalized features and class weights, outputs scaled logits.
     Can be used with BCEWithLogitsLoss.
     """
     def __init__(self, feat_dim, num_class, scale=16, temperature=0.07):
-        super(SigLIPHead, self).__init__()
+        super(SigLipHead, self).__init__()
         self.weight = nn.Parameter(torch.Tensor(feat_dim, num_class))
         nn.init.xavier_uniform_(self.weight)
         self.scale = scale

@@ -85,7 +85,7 @@ ArcFaceSigmoid:
     margin_am: 0.0
     scale: 32
 
-SigLIPHead:
+SigLipHead:
     feat_dim: 512
     num_class: 37
     scale: 16

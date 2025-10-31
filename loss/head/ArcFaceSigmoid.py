@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class ArcFaceSigmoid(nn.Module):
     """
     Sigmoid variant of ArcFace (Additive Angular Margin Loss)
-    Inspired by SigLIP + ArcFace.
+    Inspired by `SigLIP` + ArcFace.
     Output logits suitable for BCEWithLogitsLoss.
     Note: really this is a classifier head with a learned weight parameter.
     """
