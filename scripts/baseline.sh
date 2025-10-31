@@ -5,7 +5,8 @@ export CUDA_VISIBLE_DEVICES=5
 
 DATA=/home/datasets/
 
-datasets=("oxford_flowers" "stanford_cars" "oxford_pets" "food101" "sun397" "eurosat" "ucf101")
+datasets=("oxford_pets")
+# datasets=("oxford_flowers" "stanford_cars" "oxford_pets" "food101" "sun397" "eurosat" "ucf101")
 attacks=('l2t' 'ags' 'sia' 'decowa' 'bsr' 'ilpd' 'mta' 'cwa')
 SEED=1
 
