@@ -19,6 +19,7 @@ from torchvision.models import *
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from utils.util import *
 from model import UNetLikeGenerator as UNet
+import torchvision.transforms as transforms
 
 
 # custom
@@ -191,15 +192,23 @@ class AdversarialTrainer:
 
         adv_examples = torch.empty(size=[len(loader.dataset), 3, 224, 224])
         adv_labels = torch.empty(size=[len(loader.dataset),])
+        gussian = transforms.GaussianBlur(17, 4).cuda()
 
         for batch_idx, batch in enumerate(loader):
             images = batch['img'].to(self.device)
+            img_low = gussian(images)
+            img_high = images - img_low
+
             labels = batch['label'].to(self.device)
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
+                adv_low = gussian(images_adv)
+                adv_high = images_adv - adv_low
+                images_adv = img_low + adv_high
+
             adv_examples[batch_idx * loader.batch_size:
                          (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
             adv_labels[batch_idx * loader.batch_size:
