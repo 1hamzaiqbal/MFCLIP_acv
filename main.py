@@ -163,7 +163,20 @@ class AdversarialTrainer:
                 outputs = model(images, labels)
             except TypeError:
                 outputs = model(images)
-            loss = self.criterion(outputs, labels)
+
+            ##HL addition: need to one-hot encode labels for bcewithlogits loss##
+            
+            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                # Convert integer labels → one-hot for BCE
+                labels_onehot = F.one_hot(labels, num_classes=outputs.size(1)).float()
+                loss = self.criterion(outputs, labels_onehot)
+            else:
+                loss = self.criterion(outputs, labels)
+
+            #old code:
+            # loss = self.criterion(outputs, labels)
+
+            ##end HL addition##
             loss.backward()
             self.optimizer.step()
 
