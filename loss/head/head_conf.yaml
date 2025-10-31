@@ -74,3 +74,15 @@ ArcNegFace:
     num_class: 72778
     margin: 0.5
     scale: 64
+
+ArcFaceSigmoid:
+    feat_dim: 512
+    num_class: 72778
+    margin_arc: 0.35
+    margin_am: 0.0
+    scale: 32
+
+SigLipLoss:
+    feat_dim: 512
+    num_class: 72778
+    temperature: 0.07
