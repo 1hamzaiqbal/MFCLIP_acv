@@ -72,17 +72,7 @@ def _load_surrogate(
     head_factory = HeadFactory(head_name, head_config)
     model = Model(backbone, head_factory)
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    if isinstance(checkpoint, dict):
-        for key in ["state_dict", "model", "model_state_dict", "weights"]:
-            if key in checkpoint:
-                state_dict = checkpoint[key]
-                break
-        else:
-            state_dict = checkpoint
-    else:
-        state_dict = checkpoint
-
+    state_dict = torch.load(checkpoint_path, map_location="cpu")
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     if missing:
         print(f"[Warning] Missing keys when loading {checkpoint_path}: {missing}")
@@ -120,108 +110,56 @@ def _parse_class_filter(
     return indices
 
 
-def _sampling_complete(
-    total_selected: int,
-    counts: Dict[int, int],
-    target_classes: Iterable[int],
-    max_samples: Optional[int],
-    samples_per_class: Optional[int],
-) -> bool:
-    if max_samples is not None and total_selected >= max_samples:
-        return True
-
-    if samples_per_class is not None:
-        if all(counts.get(cls, 0) >= samples_per_class for cls in target_classes):
-            return True
-
-    return False
-
-
-def _collect_features_for_scenarios(
+def _collect_samples(
     dataloader,
-    scenarios: Sequence[Tuple[str, nn.Module]],
-    batch_size: int,
-    device: torch.device,
-    feature_stage: str,
     num_classes: int,
     max_samples: Optional[int] = None,
     samples_per_class: Optional[int] = None,
     class_filter: Optional[Sequence[int]] = None,
-) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
-    """Stream dataset samples and gather features for every requested scenario."""
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Materialize a subset of images (on CPU) and the corresponding labels."""
 
-    counts: Dict[int, int] = defaultdict(int)
-    class_filter_set = set(class_filter) if class_filter is not None else None
-    target_classes: Iterable[int] = (
-        class_filter if class_filter is not None else range(num_classes)
-    )
-    total_selected = 0
-    collected_labels: List[torch.Tensor] = []
-    features_by_model: Dict[str, List[torch.Tensor]] = {
-        name: [] for name, _ in scenarios
-    }
+    selected_images: List[torch.Tensor] = []
+    selected_labels: List[torch.Tensor] = []
+    counts = defaultdict(int)
 
-    def _select_indices(labels_tensor: torch.Tensor) -> List[int]:
-        nonlocal total_selected
-        chosen: List[int] = []
-        for idx, label_tensor in enumerate(labels_tensor):
-            label_int = int(label_tensor)
-            if class_filter_set is not None and label_int not in class_filter_set:
+    if class_filter is None:
+        target_classes = list(range(num_classes))
+    else:
+        target_classes = list(class_filter)
+
+    for batch in dataloader:
+        images = batch["img"]
+        labels = batch["label"]
+
+        for img, label in zip(images, labels):
+            label_int = int(label)
+            if class_filter is not None and label_int not in class_filter:
                 continue
+
             if samples_per_class is not None and counts[label_int] >= samples_per_class:
                 continue
 
-            chosen.append(idx)
+            selected_images.append(img.unsqueeze(0))
+            selected_labels.append(torch.tensor([label_int], dtype=torch.long))
             counts[label_int] += 1
-            total_selected += 1
 
-            if _sampling_complete(
-                total_selected, counts, target_classes, max_samples, samples_per_class
-            ):
+            if max_samples is not None and len(selected_labels) >= max_samples:
                 break
-        return chosen
 
-    stop_iteration = False
-    for batch in dataloader:
-        labels_tensor = batch["label"].cpu()
-        indices = _select_indices(labels_tensor)
-        if not indices:
-            continue
-
-        images_tensor = batch["img"][indices]
-        selected_labels = labels_tensor[indices]
-        collected_labels.append(selected_labels.clone())
-
-        for name, model in scenarios:
-            feats = _extract_features(
-                model,
-                images_tensor,
-                selected_labels,
-                batch_size=batch_size,
-                device=device,
-                feature_stage=feature_stage,
-            )
-            features_by_model[name].append(feats)
-
-        if _sampling_complete(
-            total_selected, counts, target_classes, max_samples, samples_per_class
-        ):
-            stop_iteration = True
-
-        if stop_iteration:
+        if max_samples is not None and len(selected_labels) >= max_samples:
             break
 
-    if not collected_labels:
+        if samples_per_class is not None:
+            if all(counts.get(cls, 0) >= samples_per_class for cls in target_classes):
+                break
+
+    if not selected_images:
         raise RuntimeError("No samples were collected with the provided filters.")
 
-    labels_tensor = torch.cat(collected_labels, dim=0)
-    aggregated_features = {}
-    for name, chunks in features_by_model.items():
-        if not chunks:
-            raise RuntimeError(f"No features were extracted for scenario '{name}'.")
-        aggregated_features[name] = torch.cat(chunks, dim=0)
-    print(f"Collected {labels_tensor.shape[0]} samples for visualization.")
-    return aggregated_features, labels_tensor
+    images_tensor = torch.cat(selected_images, dim=0)
+    labels_tensor = torch.cat(selected_labels, dim=0)
+    return images_tensor, labels_tensor
 
 
 def _extract_features(
@@ -520,13 +458,17 @@ def main(args: argparse.Namespace) -> None:
     dataloader = dataloader_map[args.split]
     classnames = trainer.dm.dataset.classnames
     class_filter = _parse_class_filter(args.class_filter, classnames)
+    images, labels = _collect_samples(
+        dataloader,
+        num_classes=trainer.dm.num_classes,
+        max_samples=args.max_samples,
+        samples_per_class=args.samples_per_class,
+        class_filter=class_filter,
+    )
+    print(f"Collected {images.shape[0]} samples for visualization.")
 
     clip_visual = trainer.clip_model.visual.cpu()
-    feature_dim = getattr(clip_visual, "output_dim", None)
-    if feature_dim is None and hasattr(trainer.clip_model, "visual"):
-        feature_dim = getattr(trainer.clip_model.visual, "output_dim", None)
-    if feature_dim is None:
-        raise AttributeError("Unable to determine CLIP visual output dimension.")
+    feature_dim = getattr(clip_visual, "output_dim", images.shape[1])
 
     scenarios: List[Tuple[str, nn.Module]] = []
     if args.include_vanilla:
@@ -559,19 +501,17 @@ def main(args: argparse.Namespace) -> None:
     if not scenarios:
         raise ValueError("No models specified. Enable --include-vanilla or provide checkpoints.")
 
-    features_by_model, labels = _collect_features_for_scenarios(
-        dataloader,
-        scenarios,
-        batch_size=args.batch_size,
-        device=device,
-        feature_stage=args.feature_stage,
-        num_classes=trainer.dm.num_classes,
-        max_samples=args.max_samples,
-        samples_per_class=args.samples_per_class,
-        class_filter=class_filter,
-    )
-
-    for name, feats in features_by_model.items():
+    features_by_model: Dict[str, torch.Tensor] = {}
+    for name, model in scenarios:
+        feats = _extract_features(
+            model,
+            images,
+            labels,
+            batch_size=args.batch_size,
+            device=device,
+            feature_stage=args.feature_stage,
+        )
+        features_by_model[name] = feats
         print(f"Extracted features for {name}: shape={tuple(feats.shape)}")
 
     tsne_embeddings = _run_tsne(
