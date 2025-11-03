@@ -64,6 +64,9 @@ class AdversarialTrainer:
         if args.attack == 'FGSM':
             self.num_iter = 1
 
+        ##HL Addition: toggle for swithcing between crossentropy loss and bcewithlogits loss (for sigmoid-based losses##
+        self.use_bcewithlogits = False if args.head.lower() not in ["sigliphead", "arcfacesigmoid"] else True
+
     def ensure_dir(self):
         for file_path in [self.surrogate_path, self.target_path, self.adv_path]:
             directory = os.path.dirname(file_path)
@@ -79,6 +82,11 @@ class AdversarialTrainer:
         backbone = self.trainer.clip_model.visual
         backbone = self.wrap_model(backbone)
         self.surrogate = Model(backbone, head_factory).to(self.device)
+        print(f"model architecture: \n\n {self.surrogate} \n\n")
+        print("Trainable parameters:")
+        for name, param in self.surrogate.named_parameters():
+            if param.requires_grad:
+                print(f"{name} | shape: {tuple(param.shape)}")
 
     def setup_target(self, name='rn18'):
         num_classes = self.trainer.dm.num_classes
@@ -111,7 +119,12 @@ class AdversarialTrainer:
         #     eta_min=1e-6
         # )
         self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=int(num_epoch/2), T_mult=1)
-        self.criterion = nn.CrossEntropyLoss().to(self.device)
+        if self.use_bcewithlogits:
+            print("Using BCEWithLogitsLoss for Sigmoid-based head.")
+            self.criterion = nn.BCEWithLogitsLoss().to(self.device)
+        else:
+            print("Using CrossEntropyLoss for Softmax-based head.")
+            self.criterion = nn.CrossEntropyLoss().to(self.device)
 
     def wrap_model(self, model):
         normalize = transforms.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])
@@ -122,6 +135,14 @@ class AdversarialTrainer:
 
     def finetune(self, num_epoch):
         loader = self.mf_loader
+
+        ##TODO: also implement resume training for optimizer and scheduler states
+        ##HL Addition: need to implement resume training logic since authors have this flag set but no implementation##
+        if args.resume and len(args.resume)>0 and os.path.exists(args.resume):
+            print(f"Resuming from checkpoint: {args.resume}")
+            self.load_model(self.surrogate, args.resume)
+        ##End##
+        
         self.setup_optimization(model=self.surrogate, num_epoch=num_epoch, optimizer=args.optimizer, lr=args.lr)
         for epoch in range(num_epoch):
             train_acc = Accuracy()
@@ -155,7 +176,21 @@ class AdversarialTrainer:
                 outputs = model(images, labels)
             except TypeError:
                 outputs = model(images)
-            loss = self.criterion(outputs, labels)
+
+            ##HL addition: need to one-hot encode labels for bcewithlogits loss##
+
+            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                # Convert integer labels → one-hot for BCE
+                labels_onehot = F.one_hot(labels, num_classes=outputs.size(1)).float()
+                loss = self.criterion(outputs, labels_onehot)
+            else:
+                loss = self.criterion(outputs, labels)
+
+            #old code:
+            # loss = self.criterion(outputs, labels)
+
+            ##end HL addition##
+
             loss.backward()
             self.optimizer.step()
 

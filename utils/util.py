@@ -91,6 +91,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.backbone = backbone_factory
         self.head = head_factory.get_head()
+        print(f"setup surrogate head: {self.head.__class__.__name__}")
         self.head_type = head_factory.head_type
 
     def forward(self, data, label=None):

@@ -20,6 +20,8 @@ from loss.head.NPCFace import NPCFace
 from loss.head.SST_Prototype import SST_Prototype
 from loss.head.ArcNegFace import ArcNegFace
 from loss.head.MagFace import MagFace
+from loss.head.ArcFaceSigmoid import ArcFaceSigmoid
+from loss.head.SigLipHead import SigLipHead
 
 
 class HeadFactory:
@@ -121,6 +123,22 @@ class HeadFactory:
             else:
                 num_class = self.head_param['num_class']
             head = torch.nn.Linear(feat_dim, num_class)
+        ##HL addition##
+        elif self.head_type == 'ArcFaceSigmoid':
+            feat_dim = self.head_param['feat_dim']
+            num_class = self.head_param['num_class']
+            margin_arc = self.head_param['margin_arc']
+            margin_am = self.head_param['margin_am']
+            scale = self.head_param['scale']
+            head = ArcFaceSigmoid(feat_dim=feat_dim, num_class=num_class, margin_arc=margin_arc, margin_am=margin_am, scale=scale)
+        
+        elif self.head_type == 'SigLipHead':
+            feat_dim = self.head_param['feat_dim']
+            num_class = self.head_param['num_class']
+            scale = self.head_param['scale']
+            temperature = self.head_param['temperature']
+            head = SigLipHead(feat_dim=feat_dim, num_class=num_class, scale=scale, temperature=temperature)
+            
         else:
             pass
         return head
