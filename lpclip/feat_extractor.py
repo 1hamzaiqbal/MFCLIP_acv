@@ -28,8 +28,6 @@ from dass.data import DatasetWrapper
 
 import clip
 
-# import pdb; pdb.set_trace()
-
 
 def print_args(args, cfg):
     print("***************")
@@ -48,48 +46,41 @@ def print_args(args, cfg):
 def reset_cfg(cfg, args):
     if args.root:
         cfg.DATASET.ROOT = args.root
-
     if args.output_dir:
         cfg.OUTPUT_DIR = args.output_dir
-
     if args.trainer:
         cfg.TRAINER.NAME = args.trainer
-
     if args.backbone:
         cfg.MODEL.BACKBONE.NAME = args.backbone
-
     if args.head:
         cfg.MODEL.HEAD.NAME = args.head
 
 
 def extend_cfg(cfg):
-    """
-    Add new config variables.
-
-    E.g.
-        from yacs.config import CfgNode as CN
-        cfg.TRAINER.MY_MODEL = CN()
-        cfg.TRAINER.MY_MODEL.PARAM_A = 1.
-        cfg.TRAINER.MY_MODEL.PARAM_B = 0.5
-        cfg.TRAINER.MY_MODEL.PARAM_C = False
-    """
     from yacs.config import CfgNode as CN
 
+    # Existing OURS block
     cfg.TRAINER.OURS = CN()
-    cfg.TRAINER.OURS.N_CTX = 10  # number of context vectors
-    cfg.TRAINER.OURS.CSC = False  # class-specific context
-    cfg.TRAINER.OURS.CTX_INIT = ""  # initialize context vectors with given words
-    cfg.TRAINER.OURS.WEIGHT_U = 0.1  # weight for the unsupervised loss
+    cfg.TRAINER.OURS.N_CTX = 10
+    cfg.TRAINER.OURS.CSC = False
+    cfg.TRAINER.OURS.CTX_INIT = ""
+    cfg.TRAINER.OURS.WEIGHT_U = 0.1
+
+    # Ensure dataset extras exist even if YAML doesn’t set them
+    if not hasattr(cfg, "DATASET"):
+        cfg.DATASET = CN()
+    if not hasattr(cfg.DATASET, "SUBSAMPLE_CLASSES"):
+        cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # compatible default ("all" | "base" | "new")
 
 
 def setup_cfg(args):
     cfg = get_cfg_default()
 
-    # allow dataset/trainer YAMLs to introduce extra keys (e.g., DATASET.SUBSAMPLE_CLASSES)
+    # allow unknown keys from YAMLs
     try:
-        cfg.set_new_allowed(True)  # yacs >= 0.1.8
+        cfg.set_new_allowed(True)  # yacs>=0.1.8
     except AttributeError:
-        from yacs.config import CfgNode as CN  # yacs < 0.1.8
+        from yacs.config import CfgNode as CN
         def _allow_new(n):
             if isinstance(n, CN):
                 n.__dict__['_new_allowed'] = True
@@ -99,7 +90,7 @@ def setup_cfg(args):
 
     extend_cfg(cfg)
 
-    # 1) dataset YAML first, then 2) method YAML
+    # 1) dataset YAML, then 2) method YAML
     if args.dataset_config_file:
         cfg.merge_from_file(args.dataset_config_file)
     if args.config_file:
@@ -112,7 +103,6 @@ def setup_cfg(args):
     return cfg
 
 
-
 def main(args):
     cfg = setup_cfg(args)
     if cfg.SEED >= 0:
@@ -120,7 +110,9 @@ def main(args):
         set_random_seed(cfg.SEED)
     setup_logger(cfg.OUTPUT_DIR)
 
-    if torch.cuda.is_available() and cfg.USE_CUDA:
+    # Device-safe setup
+    device = "cuda" if (torch.cuda.is_available() and cfg.USE_CUDA) else "cpu"
+    if device == "cuda":
         torch.backends.cudnn.benchmark = True
 
     print_args(args, cfg)
@@ -139,35 +131,36 @@ def main(args):
     else:
         dataset_input = dataset.test
 
-    tfm_train = build_transform(cfg, is_train=False)
+    tfm_eval = build_transform(cfg, is_train=False)
+    pin = (device == "cuda")
     data_loader = torch.utils.data.DataLoader(
-        DatasetWrapper(cfg, dataset_input, transform=tfm_train, is_train=False),
+        DatasetWrapper(cfg, dataset_input, transform=tfm_eval, is_train=False),
         batch_size=cfg.DATALOADER.TRAIN_X.BATCH_SIZE,
         sampler=None,
         shuffle=False,
         num_workers=cfg.DATALOADER.NUM_WORKERS,
         drop_last=False,
-        pin_memory=(torch.cuda.is_available() and cfg.USE_CUDA),
+        pin_memory=pin,
     )
 
     ########################################
     #   Setup Network
     ########################################
-    clip_model, _ = clip.load("RN50", "cuda", jit=False)
+    clip_model, _ = clip.load("RN50", device, jit=False)
     clip_model.eval()
+
     ###################################################################################################################
     # Start Feature Extractor
     feature_list = []
     label_list = []
-    train_dataiter = iter(data_loader)
-    for train_step in range(1, len(train_dataiter) + 1):
-        batch = next(train_dataiter)
-        data = batch["img"].cuda()
-        feature = clip_model.visual(data)
-        feature = feature.cpu()
-        for idx in range(len(data)):
-            feature_list.append(feature[idx].tolist())
-        label_list.extend(batch["label"].tolist())
+
+    with torch.no_grad():
+        for batch in data_loader:
+            imgs = batch["img"].to(device, non_blocking=(device == "cuda"))
+            feats = clip_model.visual(imgs).cpu().numpy()
+            feature_list.extend(feats.tolist())
+            label_list.extend(batch["label"].tolist())
+
     save_dir = os.path.join(cfg.OUTPUT_DIR, cfg.DATASET.NAME)
     os.makedirs(save_dir, exist_ok=True)
     save_filename = f"{args.split}"
