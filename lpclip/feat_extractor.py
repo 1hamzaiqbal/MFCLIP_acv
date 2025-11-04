@@ -88,7 +88,7 @@ def setup_cfg(args):
                     _allow_new(v)
         _allow_new(cfg)
 
-    extend_cfg(cfg)
+    extend_cfg(cfg)  # safe to keep
 
     # 1) dataset YAML, then 2) method YAML
     if args.dataset_config_file:
@@ -99,8 +99,17 @@ def setup_cfg(args):
     # 3) CLI overrides
     reset_cfg(cfg, args)
 
+    # --- ENSURE REQUIRED DATASET KEY EXISTS (do this *after* merges/resets) ---
+    cfg.defrost()
+    try:
+        _ = cfg.DATASET.SUBSAMPLE_CLASSES
+    except AttributeError:
+        cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # valid values typically: "all" | "base" | "new"
     cfg.freeze()
+    # --------------------------------------------------------------------------
+
     return cfg
+
 
 
 def main(args):
