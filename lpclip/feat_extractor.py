@@ -84,22 +84,33 @@ def extend_cfg(cfg):
 
 def setup_cfg(args):
     cfg = get_cfg_default()
+
+    # allow dataset/trainer YAMLs to introduce extra keys (e.g., DATASET.SUBSAMPLE_CLASSES)
+    try:
+        cfg.set_new_allowed(True)  # yacs >= 0.1.8
+    except AttributeError:
+        from yacs.config import CfgNode as CN  # yacs < 0.1.8
+        def _allow_new(n):
+            if isinstance(n, CN):
+                n.__dict__['_new_allowed'] = True
+                for v in n.values():
+                    _allow_new(v)
+        _allow_new(cfg)
+
     extend_cfg(cfg)
 
-    # 1. From the dataset config file
+    # 1) dataset YAML first, then 2) method YAML
     if args.dataset_config_file:
         cfg.merge_from_file(args.dataset_config_file)
-
-    # 2. From the method config file
     if args.config_file:
         cfg.merge_from_file(args.config_file)
 
-    # 3. From input arguments
+    # 3) CLI overrides
     reset_cfg(cfg, args)
 
     cfg.freeze()
-
     return cfg
+
 
 
 def main(args):
