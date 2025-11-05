@@ -19,7 +19,6 @@ from torchvision.models import *
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from utils.util import *
 from model import UNetLikeGenerator as UNet
-import torchvision.transforms as transforms
 
 
 # custom
@@ -207,7 +206,7 @@ class AdversarialTrainer:
                 images_adv = torch.clamp(images_adv, 0, 1)
                 adv_low = gussian(images_adv)
                 adv_high = images_adv - adv_low
-                images_adv = img_low + adv_high
+                images_adv = adv_low + adv_high
 
             adv_examples[batch_idx * loader.batch_size:
                          (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
@@ -216,7 +215,7 @@ class AdversarialTrainer:
         # adv_pth = {'images': adv_examples, 'labels': adv_labels}
         # torch.save(adv_pth, self.adv_path)
 
-        targets = ["rn18", "eff", "regnet"]
+        targets = ["rn18"]
         for target in targets:
             self.setup_target(name=target)
             self.load_model(model=self.target,
@@ -309,9 +308,12 @@ class AdversarialTrainer:
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
-                outputs = self.surrogate(images_adv, labels)
+                adv_feats, outputs = self.surrogate(images_adv, labels, return_features=True)
+                img_feats, _ = self.surrogate(images, labels, return_features=True)
 
-                loss = 10 - criterion(outputs, labels)
+                loss = torch.cosine_similarity((adv_feats).reshape(adv_feats.shape[0], -1), 
+                    (img_feats).reshape(img_feats.shape[0], -1)).mean()
+
                 loss.backward()
                 optimizer.step()
 

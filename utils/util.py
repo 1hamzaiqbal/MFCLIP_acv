@@ -93,13 +93,17 @@ class Model(nn.Module):
         self.head = head_factory.get_head()
         self.head_type = head_factory.head_type
 
-    def forward(self, data, label=None):
+    def forward(self, data, label=None, return_features = False):
         feat = self.backbone(data)
         if self.head_type == 'fc':
             pred = self.head(feat)
         else:
             pred = self.head(feat, label)
-        return pred
+
+        if not return_features:
+            return pred
+        else:
+            return feat, pred
 
 def input_diversity(x, resize_rate=1.10, diversity_prob=0.3):
     if torch.rand(1) < diversity_prob:
