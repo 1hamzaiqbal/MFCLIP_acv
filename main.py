@@ -155,7 +155,7 @@ class AdversarialTrainer:
         for epoch in range(num_epoch):
             train_acc = Accuracy()
             train_acc, loss = self.train_one_epoch(self.surrogate, train_acc, loader)
-            train_acc[epoch] = [train_acc.compute(), loss]
+            self.train_acc_loss[epoch] = [train_acc.compute(), loss]
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {loss:.6f}')
 
         self.graph_train_loss_and_acc(self.train_acc_loss)
