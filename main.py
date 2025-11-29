@@ -55,6 +55,9 @@ class AdversarialTrainer:
         self.eps = args.eps
         self.surrogate_path = f'{self.root}/{args.dataset}/{args.surrogate}_{args.head}.pth'
         self.target_path = f'{self.root}/{args.dataset}/{args.target}.pt'
+
+        ##Hl addition for image path save
+        self.figure_save_path_root = f'{self.root}/{args.dataset}/{args.surrogate}_trainplot.png'
         if args.adv_training:
             self.target_path = f'{self.root}/{args.dataset}/{args.target}_adv.pt'
         self.adv_path = f'{self.root}/{args.dataset}/{args.surrogate}_{args.head}/{args.attack}.pth'
@@ -158,12 +161,12 @@ class AdversarialTrainer:
             self.train_acc_loss[epoch] = [train_acc.compute(), loss]
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {loss:.6f}')
 
-        self.graph_train_loss_and_acc(self.train_acc_loss)
+        self.graph_train_loss_and_acc(self.train_acc_loss, self.figure_save_path_root)
         self.eval_one_epoch(self.surrogate, self.test_loader)
 
 
     ##HL addition: function for graphing train loss and acc graphs
-    def graph_train_loss_and_acc(self, train_log: dict):
+    def graph_train_loss_and_acc(self, train_log: dict, out_path:str):
         train_loss = [a[1] for a in train_log.values()]
         train_acc = [a[0] for a in train_log.values()]
         plt.figure(figsize=(8, 5))
@@ -175,7 +178,7 @@ class AdversarialTrainer:
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-        plt.show()
+        plt.savefig(out_path)
         
     def train_scratch(self, num_epoch=90,):
         self.setup_target(self.target)
