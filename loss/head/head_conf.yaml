@@ -90,3 +90,10 @@ SigLipHead:
     num_class: 37
     scale: 16
     temperature: 0.07
+
+
+HingeLossHead:
+    feat_dim: 512
+    num_class: 37
+    scale: 16
+    temperature: 0.07

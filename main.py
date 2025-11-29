@@ -66,6 +66,8 @@ class AdversarialTrainer:
 
         ##HL Addition: toggle for swithcing between crossentropy loss and bcewithlogits loss (for sigmoid-based losses##
         self.use_bcewithlogits = False if args.head.lower() not in ["sigliphead", "arcfacesigmoid"] else True
+        ##HL Addition: if using multiclasshingeloss, use this to control which criterion to use + set the margin val
+        self.hingeloss_margin = None if args.head.lower() not in ["hingelosshead"] else 1.0
 
     def ensure_dir(self):
         for file_path in [self.surrogate_path, self.target_path, self.adv_path]:
@@ -122,6 +124,9 @@ class AdversarialTrainer:
         if self.use_bcewithlogits:
             print("Using BCEWithLogitsLoss for Sigmoid-based head.")
             self.criterion = nn.BCEWithLogitsLoss().to(self.device)
+        elif self.hingeloss_margin is not None:
+            print(f"Using MultiClassHingeLoss for Hinge-loss head with margin {self.hingeloss_margin}.")
+            self.criterion = nn.MultiMarginLoss(margin=self.hingeloss_margin).to(self.device)
         else:
             print("Using CrossEntropyLoss for Softmax-based head.")
             self.criterion = nn.CrossEntropyLoss().to(self.device)
@@ -184,6 +189,7 @@ class AdversarialTrainer:
                 labels_onehot = F.one_hot(labels, num_classes=outputs.size(1)).float()
                 loss = self.criterion(outputs, labels_onehot)
             else:
+                #hingeloss and crossentropy can use interger labels
                 loss = self.criterion(outputs, labels)
 
             #old code:

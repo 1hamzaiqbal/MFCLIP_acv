@@ -22,6 +22,7 @@ from loss.head.ArcNegFace import ArcNegFace
 from loss.head.MagFace import MagFace
 from loss.head.ArcFaceSigmoid import ArcFaceSigmoid
 from loss.head.SigLipHead import SigLipHead
+from loss.head.HingeLossHead import HingeLossHead
 
 
 class HeadFactory:
@@ -138,7 +139,13 @@ class HeadFactory:
             scale = self.head_param['scale']
             temperature = self.head_param['temperature']
             head = SigLipHead(feat_dim=feat_dim, num_class=num_class, scale=scale, temperature=temperature)
-            
+        elif self.head_type == 'HingeLossHead':
+            #same as sigliphead params
+            feat_dim = self.head_param['feat_dim']
+            num_class = self.head_param['num_class']
+            scale = self.head_param['scale']
+            temperature = self.head_param['temperature']
+            head = HingeLossHead(feat_dim=feat_dim, num_class=num_class, scale=scale, temperature=temperature)
         else:
             pass
         return head
