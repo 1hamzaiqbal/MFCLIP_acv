@@ -19,6 +19,7 @@ from torchvision.models import *
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from utils.util import *
 from model import UNetLikeGenerator as UNet
+import matplotlib.pyplot as plt
 
 
 # custom
@@ -139,6 +140,8 @@ class AdversarialTrainer:
         )
 
     def finetune(self, num_epoch):
+        #HL Addition: dict for holding train epoch loss/acc
+        self.train_acc_loss = {}
         loader = self.mf_loader
 
         ##TODO: also implement resume training for optimizer and scheduler states
@@ -152,9 +155,28 @@ class AdversarialTrainer:
         for epoch in range(num_epoch):
             train_acc = Accuracy()
             train_acc, loss = self.train_one_epoch(self.surrogate, train_acc, loader)
+            train_acc[epoch] = [train_acc, loss]
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {loss:.6f}')
+
+        self.graph_train_loss_and_acc(self.train_acc_loss)
         self.eval_one_epoch(self.surrogate, self.test_loader)
 
+
+    ##HL addition: function for graphing train loss and acc graphs
+    def graph_train_loss_and_acc(self, train_log: dict):
+        train_loss = [a[1] for a in train_log.values()]
+        train_acc = [a[0] for a in train_log.values()]
+        plt.figure(figsize=(8, 5))
+        plt.plot(train_log["epoch"], train_acc, label=f"Train Accuracy")
+        plt.plot(train_log["epoch"], train_loss, label=f"Train Loss", linestyle="--")
+        plt.xlabel("Epoch")
+        plt.ylabel("Training Accuracy and Loss")
+        plt.title("Training Accuracy and Loss over Epochs")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+        
     def train_scratch(self, num_epoch=90,):
         self.setup_target(self.target)
         loader = self.train_loader
