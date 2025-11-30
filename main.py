@@ -332,8 +332,8 @@ class AdversarialTrainer:
 
         preds = parse_list(raw_text, B)
 
-        print(f"Raw text: {raw_text}")
-        print(f"Parsed list: {preds}")
+        # print(f"Raw text: {raw_text}")
+        # print(f"Parsed list: {preds}")
 
         # Convert to tensor
         preds = torch.tensor(preds, dtype=torch.long, device=self.device)
@@ -475,6 +475,8 @@ class AdversarialTrainer:
                 else:
                     adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
+                print(f"preds binary: {llm_pred_labels}")
+                print(f"labels binary: {total_gt_labels}")
             # ---------------------- CLEAN ACC ----------------------
             acc = Accuracy()
             llm_pred_labels = [] #reset for clean acc calc
