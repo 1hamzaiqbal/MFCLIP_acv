@@ -533,17 +533,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-train", action="store_true", help="do not call trainer.train()"
     )
+
+    #HL addition for openrouter api key arg
+    parser.add_argument(
+        "--apikey",
+        default=None,
+        type=str
+    )
     parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
-    #HL addition for openrouter api key arg
-    parser.add_argument(
-        "apikey",
-        default=None,
-        type=str
-    )
+
     args = parser.parse_args()
     main(args)
