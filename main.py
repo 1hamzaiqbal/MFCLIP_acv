@@ -260,38 +260,6 @@ class AdversarialTrainer:
                 acc.update((outputs, labels))
         print('eval acc: {:.4f}'.format(acc.compute()))
         return acc.compute()
-
-
-    ##HL Addition: eval with cloud vision api
-    # def cloud_eval_adv(self, batchsize):
-    #     unet = UNet().to(self.device)
-    #     ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
-    #     unet.load_state_dict(ckpt)
-    #     unet.eval()
-
-    #     loader = self.test_loader
-    #     limit = min(100, len(loader.dataset))
-    #     max_batch = math.floor(100/batchsize)
-
-    #     #use size=[len(loader.dataset), 3, 224, 224] and size=[len(loader.dataset),]
-    #     adv_examples = torch.empty(limit, 3, 224, 224)
-    #     adv_labels = torch.empty(limit)
-
-    #     for batch_idx, batch in enumerate(loader):
-    #         if batch_idx > max_batch:
-    #             break
-
-    #         images = batch['img'].to(self.device)
-    #         labels = batch['label'].to(self.device)
-    #         with torch.no_grad():
-    #             noise = unet(images)
-    #             noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
-    #             images_adv = images + noise
-    #             images_adv = torch.clamp(images_adv, 0, 1)
-    #         adv_examples[batch_idx * loader.batch_size:
-    #                      (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
-    #         adv_labels[batch_idx * loader.batch_size:
-    #                    (batch_idx + 1) * loader.batch_size] = labels.cpu()
             
     
     ##HL Addition: helper for llm inference
@@ -312,7 +280,7 @@ class AdversarialTrainer:
                 encoded_images.append(encode_image_to_base64(f.name))
 
         # Load prompts
-        system_prompt, user_prompt = load_prompts_for_dataset(self.dataset_name)
+        system_prompt, user_prompt = load_prompts_for_dataset(args.dataset)
 
         # Build content list: text + N images
         content_list = [
