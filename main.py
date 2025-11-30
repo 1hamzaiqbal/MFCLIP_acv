@@ -471,8 +471,10 @@ class AdversarialTrainer:
 
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
-                
-                adv_acc = accuracy_calc_for_llm(llm_pred_labels if "_api" not in target else llm_pred_labels.reverse(), total_gt_labels) #order seems reversed in llm case
+                if "_api" in target:
+                    llm_pred_labels = list(reversed(llm_pred_labels)) #order seems reversed in llm case
+
+                adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
                 print(f"preds binary: {llm_pred_labels}")
                 print(f"labels binary: {total_gt_labels}")
             else:
@@ -480,6 +482,7 @@ class AdversarialTrainer:
                 if "_api" not in target:
                     adv_acc = acc.compute()
                 else:
+                    llm_pred_labels = list(reversed(llm_pred_labels))
                     adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             # ---------------------- CLEAN ACC ----------------------
@@ -524,7 +527,10 @@ class AdversarialTrainer:
             
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
-                clean_acc = accuracy_calc_for_llm(llm_pred_labels if "_api" not in target else llm_pred_labels.reverse(), total_gt_labels)
+                if "_api" in target:
+                    llm_pred_labels = list(reversed(llm_pred_labels)) #order seems reversed in llm case
+
+                clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
                 print(f"preds binary: {llm_pred_labels}")
                 print(f"labels binary: {total_gt_labels}")
             else:
@@ -532,6 +538,7 @@ class AdversarialTrainer:
                 if "_api" not in target:
                     clean_acc = acc.compute()
                 else:
+                    llm_pred_labels = list(reversed(llm_pred_labels))
                     clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             print(
