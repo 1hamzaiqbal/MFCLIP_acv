@@ -340,11 +340,13 @@ class AdversarialTrainer:
 
         targets = ["rn18", "eff", "regnet", "qwen_api"]
         for target in targets:
-            self.setup_target(name=target)
-            self.load_model(model=self.target,
-                               ckpts=f'{self.root}/{args.dataset}/{target}.pt')
-            model = self.target
-            model.eval().cuda()
+            #HL Mod: don't call setup_target and model init if using api call
+            if "_api" not in target:
+                self.setup_target(name=target)
+                self.load_model(model=self.target,
+                                ckpts=f'{self.root}/{args.dataset}/{target}.pt')
+                model = self.target
+                model.eval().cuda()
             # adv_pth = torch.load(self.adv_path)
             # images_array, labels_array = adv_pth['images'], adv_pth['labels']
             images_array, labels_array = adv_examples, adv_labels
@@ -373,9 +375,13 @@ class AdversarialTrainer:
                 images = batch['img'].cuda()
                 labels = batch['label'].cuda()
 
-                with torch.no_grad():
-                    outputs = model(images)
-                    acc.update((outputs, labels))
+                if "_api" in target:
+                    outputs = self.llm_predict_batch(images)
+                else:
+                    with torch.no_grad():
+                        outputs = model(images)
+
+                acc.update((outputs, labels))
             clean_acc = acc.compute()
             print(
                 f'attack:{args.attack}, dataset:{args.dataset}, target:{target}, ASR: {clean_acc - adv_acc:.4f}, clean: {clean_acc:.4f}, adv: {adv_acc:.4f}')
