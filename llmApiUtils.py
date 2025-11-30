@@ -5,6 +5,10 @@ import base64
 
 REPO_ROOT = Path(__file__).resolve().parent
 
+def encode_image_to_base64(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+    
 def load_prompt(path):
     return Path(path).read_text().strip()
 
@@ -25,7 +29,7 @@ def classify_image_qwen(image_path, dataset_name="oxford_pets", openrouter_api_k
     }
 
     # Encode image
-    base64_image = base64.encode_image_to_base64(image_path)
+    base64_image = encode_image_to_base64(image_path)
     data_url = f"data:image/jpeg;base64,{base64_image}"
 
     messages = [
