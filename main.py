@@ -23,7 +23,7 @@ from model import UNetLikeGenerator as UNet
 ##HL Imports
 import matplotlib.pyplot as plt
 import math
-from llmApiUtils import classify_image_qwen, load_prompts_for_dataset
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64
 import torchvision.transforms.functional as TF
 from PIL import Image
 import tempfile
@@ -309,7 +309,7 @@ class AdversarialTrainer:
             pil_img = TF.to_pil_image(img.cpu())
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
                 pil_img.save(f.name)
-                encoded_images.append(self.encode_image_to_base64(f.name))
+                encoded_images.append(encode_image_to_base64(f.name))
 
         # Load prompts
         system_prompt, user_prompt = load_prompts_for_dataset(self.dataset_name)
@@ -365,7 +365,7 @@ class AdversarialTrainer:
 
         return preds
     
-    
+
     
     def eval_adv(self, batch_size):
         unet = UNet().to(self.device)
