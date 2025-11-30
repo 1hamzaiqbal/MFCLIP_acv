@@ -18,7 +18,7 @@ from utils.util import setup_cfg
 from torchvision.models import *
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from utils.util import *
-from model import UNetLikeGenerator as UNet
+from model import UNetLikeGenerator as UNet, ViTGenerator
 
 
 # custom
@@ -217,10 +217,18 @@ class AdversarialTrainer:
         return acc.compute()
 
     def eval_adv(self, batch_size):
-        unet = UNet().to(self.device)
-        ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
-        unet.load_state_dict(ckpt)
-        unet.eval()
+        if self.args.generator == 'unet':
+            generator = UNet().to(self.device)
+            ckpt_name = 'unet.pt'
+        elif self.args.generator == 'vit':
+            generator = ViTGenerator().to(self.device)
+            ckpt_name = 'vit_generator.pt'
+        else:
+            raise ValueError(f"Unknown generator: {self.args.generator}")
+
+        ckpt = torch.load(f'{self.root}/{self.args.dataset}/{ckpt_name}', map_location='cpu')
+        generator.load_state_dict(ckpt)
+        generator.eval()
 
         loader = self.test_loader
 
@@ -231,7 +239,7 @@ class AdversarialTrainer:
             images = batch['img'].to(self.device)
             labels = batch['label'].to(self.device)
             with torch.no_grad():
-                noise = unet(images)
+                noise = generator(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
@@ -315,11 +323,19 @@ class AdversarialTrainer:
         return images
 
     def train_unet(self, num_epoch=90):
-        unet = UNet().to(self.device)
+        if self.args.generator == 'unet':
+            generator = UNet().to(self.device)
+            ckpt_name = 'unet.pt'
+        elif self.args.generator == 'vit':
+            generator = ViTGenerator().to(self.device)
+            ckpt_name = 'vit_generator.pt'
+        else:
+            raise ValueError(f"Unknown generator: {self.args.generator}")
+            
         loader = self.mf_loader
-        optimizer = optim.AdamW(unet.parameters(), lr=1e-4)
+        optimizer = optim.AdamW(generator.parameters(), lr=1e-4)
         self.load_model(model=self.surrogate, ckpts=self.surrogate_path)
-        unet.train()
+        generator.train()
         criterion = nn.CrossEntropyLoss().to(self.device)
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=int(num_epoch / 2), T_mult=1)
         self.surrogate.eval().to(self.device)
@@ -331,7 +347,7 @@ class AdversarialTrainer:
                 labels = batch['label'].to(self.device)
                 optimizer.zero_grad()
 
-                noise = unet(images)
+                noise = generator(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
@@ -347,7 +363,7 @@ class AdversarialTrainer:
 
             # return train_acc, total_loss / len(loader)
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {total_loss / len(loader):.6f}')
-        self.save_model(unet, f'{self.root}/{args.dataset}/unet.pt')
+        self.save_model(generator, f'{self.root}/{args.dataset}/{ckpt_name}')
 
     def run(self):
         if self.args.flag == 'finetune':
@@ -432,6 +448,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--no-train", action="store_true", help="do not call trainer.train()"
+    )
+    parser.add_argument(
+        "--generator", type=str, default="unet", choices=["unet", "vit"], help="generator architecture"
     )
     parser.add_argument(
         "opts",

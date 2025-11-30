@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import timm
+import math
 
 
 class EfficientAttention(nn.Module):
@@ -140,8 +142,71 @@ class UNetLikeGenerator(nn.Module):
         return out
 
 
+class ViTGenerator(nn.Module):
+    def __init__(self, model_name='vit_tiny_patch16_224', input_nc=3, output_nc=3, pretrained=True):
+        super(ViTGenerator, self).__init__()
+        self.vit = timm.create_model(model_name, pretrained=pretrained)
+        
+        # Remove head
+        self.vit.reset_classifier(0)
+        
+        # Get embedding dim and patch size
+        self.embed_dim = self.vit.embed_dim
+        self.patch_size = self.vit.patch_embed.patch_size[0] if isinstance(self.vit.patch_embed.patch_size, tuple) else self.vit.patch_embed.patch_size
+        
+        # Decoder
+        # Assuming input 224x224, patch size 16 -> 14x14 patches
+        # We need to upsample from 14x14 to 224x224 (16x upsampling)
+        
+        self.decoder = nn.Sequential(
+            # 14x14 -> 28x28
+            nn.ConvTranspose2d(self.embed_dim, 256, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            
+            # 28x28 -> 56x56
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            
+            # 56x56 -> 112x112
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            
+            # 112x112 -> 224x224
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(True),
+            
+            # Final conv
+            nn.Conv2d(32, output_nc, kernel_size=3, padding=1),
+            nn.Tanh() # Output should be in range [-1, 1] or similar, usually for images
+        )
+
+    def forward(self, x):
+        # x: [B, 3, 224, 224]
+        # ViT forward features
+        x = self.vit.forward_features(x)
+        
+        # x shape depends on model. Usually [B, N_patches + 1, Embed_dim]
+        # We discard CLS token (index 0)
+        x = x[:, 1:, :] # [B, 196, Embed_dim]
+        
+        # Reshape to spatial
+        B, N, C = x.shape
+        H = W = int(math.sqrt(N))
+        x = x.transpose(1, 2).reshape(B, C, H, W)
+        
+        # Decode
+        x = self.decoder(x)
+        
+        return x
+
 # 测试代码
-generator = UNetLikeGenerator()
-input_tensor = torch.randn(1, 3, 224, 224)
-output = generator(input_tensor)
-print(output.shape)  # 应输出 torch.Size([1, 3, 224, 224])
+if __name__ == "__main__":
+    # generator = UNetLikeGenerator()
+    generator = ViTGenerator()
+    input_tensor = torch.randn(1, 3, 224, 224)
+    output = generator(input_tensor)
+    print(output.shape)  # 应输出 torch.Size([1, 3, 224, 224])
