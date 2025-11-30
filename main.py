@@ -69,6 +69,7 @@ class AdversarialTrainer:
         
         ##HL addition for setting openrouter api key
         self.openrouter_api_key = args.apikey
+        self.openrouter_headers = {"Authorization": f"Bearer {self.openrouter_api_key}", "Content-Type": "application/json"}
 
         ##Hl addition for image path save
         self.figure_save_path_root = f'{self.root}/{args.dataset}/{args.surrogate}_trainplot.png'
@@ -268,7 +269,7 @@ class AdversarialTrainer:
         images_tensor: (B, 3, 224, 224) in [0,1]
         Returns: tensor of predicted class indices (B,)
         """
-        
+
         B = images_tensor.size(0)
         encoded_images = []
 
@@ -407,7 +408,7 @@ class AdversarialTrainer:
                 else:
                     with torch.no_grad():
                         outputs = model(images)
-            acc.update((outputs, labels))
+                acc.update((outputs, labels))
             adv_acc = acc.compute()
             # return adv_acc
 
