@@ -19,7 +19,14 @@ from torchvision.models import *
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from utils.util import *
 from model import UNetLikeGenerator as UNet
+
+##HL Imports
 import matplotlib.pyplot as plt
+import math
+from llmApiUtils import classify_image_qwen
+import torchvision.transforms.functional as TF
+from PIL import Image
+import tempfile
 
 
 # custom
@@ -55,6 +62,9 @@ class AdversarialTrainer:
         self.eps = args.eps
         self.surrogate_path = f'{self.root}/{args.dataset}/{args.surrogate}_{args.head}.pth'
         self.target_path = f'{self.root}/{args.dataset}/{args.target}.pt'
+        
+        ##HL addition for setting openrouter api key
+        self.openrouter_api_key = args.apikey
 
         ##Hl addition for image path save
         self.figure_save_path_root = f'{self.root}/{args.dataset}/{args.surrogate}_trainplot.png'
@@ -247,6 +257,61 @@ class AdversarialTrainer:
         print('eval acc: {:.4f}'.format(acc.compute()))
         return acc.compute()
 
+
+    ##HL Addition: eval with cloud vision api
+    # def cloud_eval_adv(self, batchsize):
+    #     unet = UNet().to(self.device)
+    #     ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
+    #     unet.load_state_dict(ckpt)
+    #     unet.eval()
+
+    #     loader = self.test_loader
+    #     limit = min(100, len(loader.dataset))
+    #     max_batch = math.floor(100/batchsize)
+
+    #     #use size=[len(loader.dataset), 3, 224, 224] and size=[len(loader.dataset),]
+    #     adv_examples = torch.empty(limit, 3, 224, 224)
+    #     adv_labels = torch.empty(limit)
+
+    #     for batch_idx, batch in enumerate(loader):
+    #         if batch_idx > max_batch:
+    #             break
+
+    #         images = batch['img'].to(self.device)
+    #         labels = batch['label'].to(self.device)
+    #         with torch.no_grad():
+    #             noise = unet(images)
+    #             noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
+    #             images_adv = images + noise
+    #             images_adv = torch.clamp(images_adv, 0, 1)
+    #         adv_examples[batch_idx * loader.batch_size:
+    #                      (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
+    #         adv_labels[batch_idx * loader.batch_size:
+    #                    (batch_idx + 1) * loader.batch_size] = labels.cpu()
+            
+    
+    ##HL Addition: helper for llm inference
+    def llm_predict_batch(self, images_tensor):
+        """
+        images_tensor: (B, 3, 224, 224) in [0,1]
+        Returns: tensor of predicted class indices (B,)
+        """
+        preds = []
+
+        for img in images_tensor:
+            # convert tensor → PIL → temporary file
+            pil_img = TF.to_pil_image(img.cpu())
+            with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+                pil_img.save(f.name)
+                pred_idx = classify_image_qwen(f.name, dataset_name=self.dataset_name, openrouter_api_key=self.openrouter_api_key)
+            
+            if pred_idx is None:
+                pred_idx = -1   # or a default
+            
+            preds.append(pred_idx)
+
+        return torch.tensor(preds, dtype=torch.int64, device=self.device)
+    
     def eval_adv(self, batch_size):
         unet = UNet().to(self.device)
         ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
@@ -273,7 +338,7 @@ class AdversarialTrainer:
         # adv_pth = {'images': adv_examples, 'labels': adv_labels}
         # torch.save(adv_pth, self.adv_path)
 
-        targets = ["rn18", "eff", "regnet"]
+        targets = ["rn18", "eff", "regnet", "qwen_api"]
         for target in targets:
             self.setup_target(name=target)
             self.load_model(model=self.target,
@@ -293,9 +358,13 @@ class AdversarialTrainer:
                 images = images_array[start_idx:end_idx].to(self.device)
                 labels = labels_array[start_idx:end_idx].to(self.device)
 
-                with torch.no_grad():
-                    outputs = model(images)
-                    acc.update((outputs, labels))
+                ##HL Addition: switch between api calls and local model inference
+                if "_api" in target:
+                    outputs = self.llm_predict_batch(images)
+                else:
+                    with torch.no_grad():
+                        outputs = model(images)
+            acc.update((outputs, labels))
             adv_acc = acc.compute()
             # return adv_acc
 
@@ -469,6 +538,12 @@ if __name__ == "__main__":
         default=None,
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
+    )
+    #HL addition for openrouter api key arg
+    parser.add_argument(
+        "apikey",
+        default=None,
+        type=str
     )
     args = parser.parse_args()
     main(args)
