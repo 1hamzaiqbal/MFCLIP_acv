@@ -298,7 +298,7 @@ class AdversarialTrainer:
         payload = {
             "model": "qwen/qwen3-vl-30b-a3b-instruct",
             "temperature": 0,
-            "max_tokens": 50,        # enough for 128 ints
+            "max_tokens": 512,        # enough for 128 ints
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": content_list}
