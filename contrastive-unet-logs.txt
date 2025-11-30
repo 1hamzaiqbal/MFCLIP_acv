@@ -1,4 +1,3 @@
-Training losses, oxford pets, contrastive
 Epoch: 0, train acc: 0.1291, loss: 0.285176
 Epoch: 1, train acc: 0.0589, loss: 0.187535
 Epoch: 2, train acc: 0.0499, loss: 0.167588
@@ -89,25 +88,3 @@ Epoch: 86, train acc: 0.0104, loss: -0.022538
 Epoch: 87, train acc: 0.0077, loss: -0.020964
 Epoch: 88, train acc: 0.0107, loss: -0.023506
 Epoch: 89, train acc: 0.0077, loss: -0.024327
-
-EVAL -- oxford pets, oxford pets, oxfor pets, vanilla mf 
-attack:ours, dataset:oxford_pets, target:rn18, ASR: 0.4113, clean: 0.5026, adv: 0.0913
-
-EVAL -- oxford pets, oxford pets, oxfor pets, contrastive mf -- seed 1
-attack:ours, dataset:oxford_pets, target:rn18, ASR: 0.3987, clean: 0.5026, adv: 0.1038
-
-EVAL -- oxford pets, oxford pets, oxfor flowers, contrastive mf -- seed 1
-attack:ours, dataset:oxford_flowers, target:rn18, ASR: 0.4129, clean: 0.8384, adv: 0.4255
-
-EVAL -- oxford pets, oxford pets, oxfor flowers, vanilla mf 
-attack:ours, dataset:oxford_flowers, target:rn18, ASR: 0.2944, clean: 0.8384, adv: 0.5441
-
-EVAL -- gaussian -- img low adv high
-attack:ours, dataset:oxford_pets, target:rn18, ASR: 0.0657, clean: 0.5026, adv: 0.4369
-
-EVAL -- gaussian --adv low, img high
-attack:ours, dataset:oxford_pets, target:rn18, ASR: 0.3183, clean: 0.5026, adv: 0.1842
-
-EVAL -- gaussian -- adv low, adv high
-attack:ours, dataset:oxford_pets, target:rn18, ASR: 0.4094, clean: 0.5026, adv: 0.0932
-
