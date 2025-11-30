@@ -586,6 +586,7 @@ class AdversarialTrainer:
         return images
 
     def train_unet(self, num_epoch=90):
+        print(f"unet will be saved as: {self.root}/{args.dataset}/{args.head}_unet.pt")
         unet = UNet().to(self.device)
         loader = self.mf_loader
         optimizer = optim.AdamW(unet.parameters(), lr=1e-4)
@@ -618,7 +619,7 @@ class AdversarialTrainer:
 
             # return train_acc, total_loss / len(loader)
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {total_loss / len(loader):.6f}')
-        self.save_model(unet, f'{self.root}/{args.dataset}/unet.pt')
+        self.save_model(unet, f'{self.root}/{args.dataset}/{args.head}_unet.pt')
 
     def run(self):
         if self.args.flag == 'finetune':
