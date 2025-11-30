@@ -468,6 +468,8 @@ class AdversarialTrainer:
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
                 adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+                print(f"preds binary: {llm_pred_labels}")
+                print(f"labels binary: {total_gt_labels}")
             else:
                 # multiclass local model uses Ignite, API uses list accuracy
                 if "_api" not in target:
@@ -475,8 +477,6 @@ class AdversarialTrainer:
                 else:
                     adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
-                print(f"preds binary: {llm_pred_labels}")
-                print(f"labels binary: {total_gt_labels}")
             # ---------------------- CLEAN ACC ----------------------
             acc = Accuracy()
             llm_pred_labels = [] #reset for clean acc calc
@@ -520,6 +520,8 @@ class AdversarialTrainer:
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
                 clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+                print(f"preds binary: {llm_pred_labels}")
+                print(f"labels binary: {total_gt_labels}")
             else:
                 # multiclass local model uses Ignite, API uses list accuracy
                 if "_api" not in target:
