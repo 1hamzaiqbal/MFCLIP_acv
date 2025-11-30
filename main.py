@@ -513,7 +513,9 @@ class AdversarialTrainer:
             self.setup_surrogate()
             self.train_unet(num_epoch=args.num_epoch)
         elif self.args.flag == 'eval_adv':
-            self.eval_adv(batch_size=512)
+            # self.eval_adv(batch_size=512)
+            ##HL mod: DO NOT USE 512 BS SINCE WE USING LLM APIS
+            self.eval_adv(batch_size=args.bs)
         else:
             raise NameError
 
