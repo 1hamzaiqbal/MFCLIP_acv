@@ -23,7 +23,7 @@ from model import UNetLikeGenerator as UNet
 ##HL Imports
 import matplotlib.pyplot as plt
 import math
-from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, fix_json_list
 import torchvision.transforms.functional as TF
 from PIL import Image
 import tempfile
@@ -330,23 +330,29 @@ class AdversarialTrainer:
             return torch.full((B,), -1, dtype=torch.long, device=self.device)
 
         # Parse JSON list safely
-        try:
-            preds = json.loads(raw_text)
-        except:
+        parsed = fix_json_list(raw_text)
+
+        if parsed is None or not isinstance(parsed, list):
             print("LLM returned invalid JSON:", raw_text)
-            preds = [-1] * B
+            preds = [0] * B   # safe fallback
+        else:
+            preds = parsed
+
 
         # Convert to tensor
         preds = torch.tensor(preds, dtype=torch.long, device=self.device)
 
-        if preds.size(0) != B:
-            print("WARNING: LLM returned wrong batch size:", preds.size(0), "expected", B)
-            # pad or cut to size
-            if preds.size(0) < B:
-                pad = torch.full((B - preds.size(0),), -1, dtype=torch.long, device=self.device)
-                preds = torch.cat([preds, pad], dim=0)
-            else:
-                preds = preds[:B]
+        # Pad or trim to batch size
+        if preds.size(0) < B:
+            pad = torch.zeros((B - preds.size(0),), dtype=torch.long, device=self.device)
+            preds = torch.cat([preds, pad], dim=0)
+        elif preds.size(0) > B:
+            preds = preds[:B]
+
+        # Clamp invalid indices
+        num_classes = self.trainer.dm.num_classes
+        preds = torch.clamp(preds, 0, num_classes - 1)
+
 
         return preds
 
@@ -402,6 +408,9 @@ class AdversarialTrainer:
 
                 if "_api" in target:
                     preds = self.llm_predict_batch(images)
+                    # Fix invalid predictions (-1 or > #classes)
+                    preds = torch.clamp(preds, 0, self.trainer.dm.num_classes - 1)
+
                     outputs = torch.nn.functional.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
                 else:
                     with torch.no_grad():
