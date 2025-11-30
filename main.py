@@ -268,7 +268,7 @@ class AdversarialTrainer:
         images_tensor: (B, 3, 224, 224) in [0,1]
         Returns: tensor of predicted class indices (B,)
         """
-
+        
         B = images_tensor.size(0)
         encoded_images = []
 
@@ -282,6 +282,12 @@ class AdversarialTrainer:
         # Load prompts
         system_prompt, user_prompt = load_prompts_for_dataset(args.dataset)
 
+        # Append the JSON instruction BEFORE adding to content_list
+        user_prompt = (
+            user_prompt
+            + "\nReturn a JSON list of integers, one per image, in order. Only output JSON."
+        )
+
         # Build content list: text + N images
         content_list = [
             {"type": "text", "text": user_prompt},
@@ -291,9 +297,6 @@ class AdversarialTrainer:
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
             })
-
-        # Force JSON output list
-        user_prompt += "\nReturn a JSON list of integers, one per image, in order. Only output JSON."
 
         payload = {
             "model": "qwen/qwen3-vl-30b-a3b-instruct",
@@ -305,33 +308,47 @@ class AdversarialTrainer:
             ]
         }
 
-        # Call API
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=self.openrouter_headers,
             json=payload
         )
 
-        response_json = response.json()
+        # Validate response
+        try:
+            response_json = response.json()
+        except:
+            print("Invalid JSON from API:", response.text)
+            return torch.full((B,), -1, dtype=torch.long, device=self.device)
 
         # Extract output
-        raw_text = response_json["choices"][0]["message"]["content"].strip()
+        try:
+            raw_text = response_json["choices"][0]["message"]["content"].strip()
+        except:
+            print("Malformed response:", response_json)
+            return torch.full((B,), -1, dtype=torch.long, device=self.device)
 
         # Parse JSON list safely
         try:
             preds = json.loads(raw_text)
         except:
             print("LLM returned invalid JSON:", raw_text)
-            # fallback: fill with -1
             preds = [-1] * B
 
         # Convert to tensor
         preds = torch.tensor(preds, dtype=torch.long, device=self.device)
+
         if preds.size(0) != B:
-            print("WARNING: LLM returned wrong batch size")
-            preds = preds[:B]
+            print("WARNING: LLM returned wrong batch size:", preds.size(0), "expected", B)
+            # pad or cut to size
+            if preds.size(0) < B:
+                pad = torch.full((B - preds.size(0),), -1, dtype=torch.long, device=self.device)
+                preds = torch.cat([preds, pad], dim=0)
+            else:
+                preds = preds[:B]
 
         return preds
+
     
 
     
