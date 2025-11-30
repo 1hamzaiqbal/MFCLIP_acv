@@ -3,12 +3,15 @@ import requests
 import json
 import base64
 
+REPO_ROOT = Path(__file__).resolve().parent
+
 def load_prompt(path):
     return Path(path).read_text().strip()
 
 def load_prompts_for_dataset(name):
-    system_path = f"prompts/{name}_system.txt"
-    user_path   = f"prompts/{name}_user.txt"
+    system_path = REPO_ROOT / "prompts" / f"{name}_system.txt"
+    user_path   = REPO_ROOT / "prompts" / f"{name}_user.txt"
+
     return load_prompt(system_path), load_prompt(user_path)
 
 
