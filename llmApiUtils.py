@@ -3,6 +3,7 @@ import requests
 import json
 import base64
 import re
+import ast
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -19,46 +20,46 @@ def load_prompts_for_dataset(name):
 
     return load_prompt(system_path), load_prompt(user_path)
 
-def fix_json_list(raw_text):
-    """
-    Attempt to repair common JSON formatting issues from LLM output.
-    Only repairs:
-      - missing closing ']' or '}'
-      - trailing commas
-      - dict wrapper {"predictions": [...]}
+def parse_list(raw_text, B):
+    """Robust parsing of Python-style list responses."""
 
-    Never invents missing values.
-    If cannot fix safely → return None.
-    """
-
-    txt = raw_text.strip()
-
-    # If it's a dict like {"predictions": [...]}
-    if txt.startswith("{") and "predictions" in txt:
-        try:
-            data = json.loads(txt)
-            if isinstance(data, dict) and "predictions" in data:
-                return data["predictions"]
-        except:
-            pass  # fall through to repair attempts
-
-    # Remove trailing commas: [1,2,3,]
-    txt = re.sub(r",\s*]", "]", txt)
-
-    # If it starts like a list but ends mid-way
-    if txt.startswith("[") and not txt.endswith("]"):
-        txt = txt + "]"
-
-    # If it starts like a dict but missing ending
-    if txt.startswith("{") and not txt.endswith("}"):
-        txt = txt + "}"
-
-    # Final attempt to parse
+    # 1. Try literal_eval directly
     try:
-        data = json.loads(txt)
-        return data
+        parsed = ast.literal_eval(raw_text)
+        if isinstance(parsed, list):
+            return parsed
     except:
-        return None
+        pass
+
+    # 2. Try to auto-fix truncated lists
+    #    e.g., "[1,2,3"  → add closing bracket
+    fixed = raw_text.strip()
+    if not fixed.endswith("]"):
+        fixed = fixed + "]"
+
+    try:
+        parsed = ast.literal_eval(fixed)
+        if isinstance(parsed, list):
+            return parsed
+    except:
+        pass
+
+    # 3. Try removing trailing garbage, only keep inside last []
+    if "[" in raw_text:
+        sub = raw_text[raw_text.rfind("["):]
+        if not sub.endswith("]"):
+            sub += "]"
+
+        try:
+            parsed = ast.literal_eval(sub)
+            if isinstance(parsed, list):
+                return parsed
+        except:
+            pass
+
+    # 4. If STILL broken → fallback
+    print("LLM returned invalid list:", raw_text)
+    return [0] * B
 
 def classify_image_qwen(image_path, dataset_name="oxford_pets", openrouter_api_key=""):
     system_prompt, user_prompt = load_prompts_for_dataset(dataset_name)
