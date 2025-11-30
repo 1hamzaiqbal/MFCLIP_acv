@@ -7,6 +7,12 @@ import ast
 
 REPO_ROOT = Path(__file__).resolve().parent
 
+def accuracy_calc_for_llm(preds, labels):
+    preds  = preds.cpu().numpy()
+    labels = labels.cpu().numpy()
+    return (preds == labels).mean()
+
+
 def encode_image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')

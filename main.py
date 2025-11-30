@@ -23,7 +23,7 @@ from model import UNetLikeGenerator as UNet
 ##HL Imports
 import matplotlib.pyplot as plt
 import math
-from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, parse_list
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, parse_list, accuracy_calc_for_llm
 import torchvision.transforms.functional as TF
 from PIL import Image
 import tempfile
@@ -381,7 +381,8 @@ class AdversarialTrainer:
         # -----------------------------
         adv_examples = torch.empty(size=[limit, 3, 224, 224])
         adv_labels   = torch.empty(size=[limit], dtype=torch.long)
-
+        total_gt_labels = []
+        llm_pred_labels = []
         # -----------------------------
         # Generate adversarial examples (limited)
         # -----------------------------
@@ -396,7 +397,7 @@ class AdversarialTrainer:
                 bsz = limit - filled
                 images = images[:bsz]
                 labels = labels[:bsz]
-
+                total_gt_labels.extend(labels.detach().cpu().tolist())
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
@@ -425,6 +426,7 @@ class AdversarialTrainer:
             # ---------------------- ADV ACC ----------------------
             acc = Accuracy()
 
+            ##HL Mod: only use the ignite's acc.ipdate and compute methods if using local models, otherwise use accuracy_calc_for_llm func
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
                 end_idx = min(start_idx + batch_size, limit)
@@ -434,16 +436,21 @@ class AdversarialTrainer:
 
                 if "_api" in target:
                     outputs = self.llm_predict_batch(images)
+                    llm_pred_labels.extend(outputs)
+
                 else:
                     with torch.no_grad():
                         outputs = model(images)
+                        acc.update((outputs, labels))
 
-                acc.update((outputs, labels))
-
-            adv_acc = acc.compute()
+            if "_api" not in target:
+                adv_acc = acc.compute()
+            else:
+                adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             # ---------------------- CLEAN ACC ----------------------
             acc = Accuracy()
+            llm_pred_labels = [] #reset for clean acc calc
 
             filled = 0
             for batch in loader:
@@ -458,17 +465,21 @@ class AdversarialTrainer:
 
                 if "_api" in target:
                     outputs = self.llm_predict_batch(images)
+                    llm_pred_labels.extend(outputs)
                 else:
                     with torch.no_grad():
                         outputs = model(images)
 
-                acc.update((outputs, labels))
+                        acc.update((outputs, labels))
                 filled += bsz
 
                 if filled >= limit:
                     break
-
-            clean_acc = acc.compute()
+            
+            if "_api" not in target:
+                clean_acc = acc.compute()
+            else:
+                clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             print(
                 f'attack:{self.args.attack}, dataset:{self.args.dataset}, target:{target}, '
