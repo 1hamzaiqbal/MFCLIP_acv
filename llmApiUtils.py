@@ -8,7 +8,8 @@ import ast
 REPO_ROOT = Path(__file__).resolve().parent
 
 def accuracy_calc_for_llm(preds, labels):
-    return (preds == labels).mean()
+    correct = sum(1 for p, gt in zip(preds, labels) if p == gt)
+    return correct / len(labels)
 
 
 def encode_image_to_base64(image_path):
