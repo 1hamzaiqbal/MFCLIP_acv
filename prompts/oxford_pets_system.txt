@@ -38,4 +38,4 @@ You classify Oxford-IIIT Pet images. Use this class index mapping:
 36 Wheaten_Terrier
 37 Yorkshire_Terrier
 
-Always return ONLY the integer index 1–37. No words, no punctuation.
+Always return ONLY the integer index 1–37. No words.

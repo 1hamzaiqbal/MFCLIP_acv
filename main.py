@@ -390,14 +390,14 @@ class AdversarialTrainer:
         for batch in loader:
             images = batch['img'].to(self.device)
             labels = batch['label'].to(self.device)
-            print(labels)
+            total_gt_labels.extend(labels.detach().cpu().tolist())
+
             bsz = images.size(0)
 
             if filled + bsz > limit:
                 bsz = limit - filled
                 images = images[:bsz]
                 labels = labels[:bsz]
-                total_gt_labels.extend(labels.detach().cpu().tolist())
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
@@ -414,7 +414,7 @@ class AdversarialTrainer:
         # Now evaluate targets on limited set
         # -----------------------------
         targets = ["rn18", "eff", "regnet", "qwen_api"]
-
+        print(f"gt labels: {total_gt_labels}")
         for target in targets:
             if "_api" not in target:
                 self.setup_target(name=target)
