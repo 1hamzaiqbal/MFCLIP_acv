@@ -278,7 +278,9 @@ class AdversarialTrainer:
             pil_img = TF.to_pil_image(img.cpu())
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
                 pil_img.save(f.name)
-                encoded_images.append(encode_image_to_base64(f.name))
+                b64_img = encode_image_to_base64(f.name)
+                print(f"img encoded len: {b64_img} | fname: {f.name}")
+                encoded_images.append(b64_img)
 
         # Load prompts
         system_prompt, user_prompt = load_prompts_for_dataset(args.dataset)
@@ -331,6 +333,8 @@ class AdversarialTrainer:
 
         preds = parse_list(raw_text, B)
 
+        print(f"Raw text: {raw_text}")
+        print(f"Parsed list: {preds}")
 
         # Convert to tensor
         preds = torch.tensor(preds, dtype=torch.long, device=self.device)
