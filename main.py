@@ -405,6 +405,7 @@ class AdversarialTrainer:
 
             adv_examples[filled:filled+bsz] = images_adv.cpu()
             adv_labels[filled:filled+bsz]   = labels.cpu()
+            print(f"adv labels: {adv_labels}")
             filled += bsz
 
             if filled >= limit:
