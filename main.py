@@ -374,6 +374,18 @@ class AdversarialTrainer:
                 else:
                     # Maximize loss w.r.t true label (Untargeted)
                     loss = 10 - criterion(outputs, labels)
+                
+                if self.args.contrastive:
+                    # Feature Disruption: Maximize distance between clean and adv features
+                    # 1 - CosineSim(clean, adv) -> Minimize similarity
+                    feat_clean = self.surrogate.backbone(images)
+                    feat_adv = self.surrogate.backbone(images_adv)
+                    loss_contrastive = 1 - F.cosine_similarity(feat_clean, feat_adv).mean()
+                    
+                    # Weighting factor (lambda) - hardcoded to 1.0 for now, or use args.ratio?
+                    # Let's use a fixed weight or reuse ratio if appropriate, but 1.0 is a good start.
+                    loss += loss_contrastive
+                    
                 loss.backward()
                 optimizer.step()
 
@@ -487,6 +499,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--targeted", action="store_true", help="enable targeted adversarial training"
+    )
+    parser.add_argument(
+        "--contrastive", action="store_true", help="enable contrastive feature disruption loss"
     )
     parser.add_argument(
         "opts",
