@@ -295,8 +295,8 @@ class AdversarialTrainer:
         ]
         for b64 in encoded_images:
             content_list.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+            "type": "input_image",
+            "image": f"data:image/jpeg;base64,{b64}"
             })
 
         payload = {
@@ -357,61 +357,88 @@ class AdversarialTrainer:
         return preds
 
     
-
-    
     def eval_adv(self, batch_size):
+        # -----------------------------
+        # Apply a rate limit if provided
+        # -----------------------------
+        limit = self.args.limit
+        full_dataset_size = len(self.test_loader.dataset)
+
+        if limit is not None:
+            limit = min(limit, full_dataset_size)
+            print(f"[Rate Limit] Evaluating only first {limit} images out of {full_dataset_size}")
+        else:
+            limit = full_dataset_size
+
+        # -----------------------------
+        # Load UNet
+        # -----------------------------
         unet = UNet().to(self.device)
-        ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
+        ckpt = torch.load(f'{self.root}/{self.args.dataset}/unet.pt', map_location='cpu')
         unet.load_state_dict(ckpt)
         unet.eval()
 
         loader = self.test_loader
 
-        # FIX dtype
-        adv_examples = torch.empty(size=[len(loader.dataset), 3, 224, 224])
-        adv_labels = torch.empty(len(loader.dataset), dtype=torch.long)
+        # -----------------------------
+        # Allocate arrays for limited size
+        # -----------------------------
+        adv_examples = torch.empty(size=[limit, 3, 224, 224])
+        adv_labels   = torch.empty(size=[limit], dtype=torch.long)
 
-        # --- Generate adversarial examples ---
-        for batch_idx, batch in enumerate(loader):
+        # -----------------------------
+        # Generate adversarial examples (limited)
+        # -----------------------------
+        filled = 0
+        for batch in loader:
             images = batch['img'].to(self.device)
             labels = batch['label'].to(self.device)
+            bsz = images.size(0)
+
+            if filled + bsz > limit:
+                bsz = limit - filled
+                images = images[:bsz]
+                labels = labels[:bsz]
+
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = torch.clamp(images + noise, 0, 1)
 
-            adv_examples[batch_idx * loader.batch_size : (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
-            adv_labels[batch_idx * loader.batch_size : (batch_idx + 1) * loader.batch_size] = labels.cpu()
+            adv_examples[filled:filled+bsz] = images_adv.cpu()
+            adv_labels[filled:filled+bsz]   = labels.cpu()
+            filled += bsz
 
+            if filled >= limit:
+                break
+
+        # -----------------------------
+        # Now evaluate targets on limited set
+        # -----------------------------
         targets = ["rn18", "eff", "regnet", "qwen_api"]
 
         for target in targets:
-
             if "_api" not in target:
                 self.setup_target(name=target)
-                self.load_model(model=self.target, ckpts=f'{self.root}/{args.dataset}/{target}.pt')
-                model = self.target
-                model.eval().cuda()
+                self.load_model(self.target, f'{self.root}/{self.args.dataset}/{target}.pt')
+                model = self.target.eval().cuda()
 
-            images_array, labels_array = adv_examples, adv_labels
-            num_batches = (len(images_array) + batch_size - 1) // batch_size
+            num_batches = (limit + batch_size - 1) // batch_size
 
             # ---------------------- ADV ACC ----------------------
             acc = Accuracy()
 
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, len(images_array))
+                end_idx = min(start_idx + batch_size, limit)
 
-                images = images_array[start_idx:end_idx].to(self.device)
-                labels = labels_array[start_idx:end_idx].to(self.device)
+                images = adv_examples[start_idx:end_idx].to(self.device)
+                labels = adv_labels[start_idx:end_idx].to(self.device)
 
                 if "_api" in target:
                     preds = self.llm_predict_batch(images)
-                    # Fix invalid predictions (-1 or > #classes)
                     preds = torch.clamp(preds, 0, self.trainer.dm.num_classes - 1)
-
-                    outputs = torch.nn.functional.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
+                    outputs = F.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
                 else:
                     with torch.no_grad():
                         outputs = model(images)
@@ -423,25 +450,38 @@ class AdversarialTrainer:
             # ---------------------- CLEAN ACC ----------------------
             acc = Accuracy()
 
+            filled = 0
             for batch in loader:
                 images = batch['img'].cuda()
                 labels = batch['label'].cuda()
+                bsz = images.size(0)
+
+                if filled + bsz > limit:
+                    bsz = limit - filled
+                    images = images[:bsz]
+                    labels = labels[:bsz]
 
                 if "_api" in target:
                     preds = self.llm_predict_batch(images)
-                    outputs = torch.nn.functional.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
+                    outputs = F.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
                 else:
                     with torch.no_grad():
                         outputs = model(images)
 
                 acc.update((outputs, labels))
+                filled += bsz
+
+                if filled >= limit:
+                    break
 
             clean_acc = acc.compute()
 
             print(
-                f'attack:{args.attack}, dataset:{args.dataset}, target:{target}, '
+                f'attack:{self.args.attack}, dataset:{self.args.dataset}, target:{target}, '
                 f'ASR: {clean_acc - adv_acc:.4f}, clean: {clean_acc:.4f}, adv: {adv_acc:.4f}'
             )
+
+
 
     def save_model(self, model, ckpts):
         torch.save(model.state_dict(), ckpts)
@@ -602,6 +642,10 @@ if __name__ == "__main__":
         default=None,
         type=str
     )
+    ##HL addition: added limiter for inference
+    parser.add_argument("--inferlimit", type=int, default=None,
+                    help="Limit number of images for UNet + LLM evaluation")
+
     parser.add_argument(
         "opts",
         default=None,
