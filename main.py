@@ -361,7 +361,7 @@ class AdversarialTrainer:
         # -----------------------------
         # Apply a rate limit if provided
         # -----------------------------
-        limit = self.args.limit
+        limit = self.args.inferlimit
         full_dataset_size = len(self.test_loader.dataset)
 
         if limit is not None:
