@@ -330,7 +330,7 @@ class AdversarialTrainer:
             generator = UNet().to(self.device)
             ckpt_name = 'unet.pt'
         elif self.args.generator == 'vit':
-            generator = ViTGenerator().to(self.device)
+            generator = ViTGenerator(num_classes=self.trainer.dm.num_classes).to(self.device)
             ckpt_name = 'vit_generator.pt'
         else:
             raise ValueError(f"Unknown generator: {self.args.generator}")
@@ -351,13 +351,29 @@ class AdversarialTrainer:
                 labels = batch['label'].to(self.device)
                 optimizer.zero_grad()
 
-                noise = generator(images)
+                if self.args.targeted:
+                    # Targeted Attack: Generate random target labels != true labels
+                    target_labels = torch.randint(0, self.trainer.dm.num_classes, labels.shape).to(self.device)
+                    # Ensure target != label (simple retry or just accept collision for simplicity, 
+                    # but let's do a simple fix for collisions)
+                    mask = (target_labels == labels)
+                    target_labels[mask] = (target_labels[mask] + 1) % self.trainer.dm.num_classes
+                    
+                    noise = generator(images, target_labels)
+                else:
+                    noise = generator(images)
+                
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
                 outputs = self.surrogate(images_adv, labels)
 
-                loss = 10 - criterion(outputs, labels)
+                if self.args.targeted:
+                    # Minimize loss w.r.t target label
+                    loss = criterion(outputs, target_labels)
+                else:
+                    # Maximize loss w.r.t true label (Untargeted)
+                    loss = 10 - criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
 
@@ -468,6 +484,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--generator", type=str, default="unet", choices=["unet", "vit"], help="generator architecture"
+    )
+    parser.add_argument(
+        "--targeted", action="store_true", help="enable targeted adversarial training"
     )
     parser.add_argument(
         "opts",

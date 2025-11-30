@@ -143,7 +143,7 @@ class UNetLikeGenerator(nn.Module):
 
 
 class ViTGenerator(nn.Module):
-    def __init__(self, model_name='vit_tiny_patch16_224', input_nc=3, output_nc=3, pretrained=True):
+    def __init__(self, model_name='vit_tiny_patch16_224', input_nc=3, output_nc=3, pretrained=True, num_classes=37):
         super(ViTGenerator, self).__init__()
         self.vit = timm.create_model(model_name, pretrained=pretrained)
         
@@ -154,13 +154,18 @@ class ViTGenerator(nn.Module):
         self.embed_dim = self.vit.embed_dim
         self.patch_size = self.vit.patch_embed.patch_size[0] if isinstance(self.vit.patch_embed.patch_size, tuple) else self.vit.patch_embed.patch_size
         
+        # Label Embedding for Targeted Attack
+        self.num_classes = num_classes
+        self.label_emb = nn.Embedding(num_classes, self.embed_dim)
+
         # Decoder
         # Assuming input 224x224, patch size 16 -> 14x14 patches
         # We need to upsample from 14x14 to 224x224 (16x upsampling)
         
+        # Input dim is doubled because we concat image features + label embedding
         self.decoder = nn.Sequential(
             # 14x14 -> 28x28
-            nn.ConvTranspose2d(self.embed_dim, 256, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(self.embed_dim * 2, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(True),
             
@@ -184,7 +189,7 @@ class ViTGenerator(nn.Module):
             nn.Tanh() # Output should be in range [-1, 1] or similar, usually for images
         )
 
-    def forward(self, x):
+    def forward(self, x, target_labels=None):
         # x: [B, 3, 224, 224]
         # ViT forward features
         x = self.vit.forward_features(x)
@@ -196,8 +201,23 @@ class ViTGenerator(nn.Module):
         # Reshape to spatial
         B, N, C = x.shape
         H = W = int(math.sqrt(N))
-        x = x.transpose(1, 2).reshape(B, C, H, W)
+        x = x.transpose(1, 2).reshape(B, C, H, W) # [B, C, 14, 14]
         
+        # Conditioning
+        if target_labels is not None:
+            # target_labels: [B]
+            emb = self.label_emb(target_labels) # [B, C]
+            emb = emb.unsqueeze(-1).unsqueeze(-1) # [B, C, 1, 1]
+            emb = emb.expand(-1, -1, H, W) # [B, C, 14, 14]
+            x = torch.cat([x, emb], dim=1) # [B, 2*C, 14, 14]
+        else:
+            # If no target provided (e.g. untargeted training), concat zeros or handle appropriately
+            # For now, we assume target is always provided in targeted mode. 
+            # If not, we can concat a zero embedding or a learned "null" embedding.
+            # Here we just concat zeros to match dimensions
+            zeros = torch.zeros_like(x)
+            x = torch.cat([x, zeros], dim=1)
+
         # Decode
         x = self.decoder(x)
         
