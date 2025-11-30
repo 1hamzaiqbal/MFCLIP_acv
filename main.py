@@ -482,6 +482,8 @@ class AdversarialTrainer:
                 if "_api" not in target:
                     adv_acc = acc.compute()
                 else:
+                    print(f"llm preds: {llm_pred_labels}")
+                    print(f"labels: {total_gt_labels}")
                     llm_pred_labels = list(reversed(llm_pred_labels))
                     adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
@@ -538,6 +540,8 @@ class AdversarialTrainer:
                 if "_api" not in target:
                     clean_acc = acc.compute()
                 else:
+                    print(f"llm preds: {llm_pred_labels}")
+                    print(f"labels: {total_gt_labels}")
                     llm_pred_labels = list(reversed(llm_pred_labels))
                     clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
