@@ -411,16 +411,20 @@ class AdversarialTrainer:
             if filled >= limit:
                 break
         
-
+        
         if self.args.dataset == "oxford_pets":
+            print(f"gt labels before binary mapping: {total_gt_labels}")
             total_gt_labels = [oxford_pets_to_binary(x) for x in total_gt_labels]
+
         # -----------------------------
         # Now evaluate targets on limited set
         # -----------------------------
         targets = ["rn18", "eff", "regnet", "qwen_api"]
         print(f"gt labels: {total_gt_labels}")
         for target in targets:
+
             llm_pred_labels = []     # reset for this model & for ADV
+
             if "_api" not in target:
                 self.setup_target(name=target)
                 self.load_model(self.target, f'{self.root}/{self.args.dataset}/{target}.pt')
@@ -467,7 +471,8 @@ class AdversarialTrainer:
 
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
-                adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+                
+                adv_acc = accuracy_calc_for_llm(llm_pred_labels if "_api" not in target else llm_pred_labels.reverse(), total_gt_labels) #order seems reversed in llm case
                 print(f"preds binary: {llm_pred_labels}")
                 print(f"labels binary: {total_gt_labels}")
             else:
@@ -519,7 +524,7 @@ class AdversarialTrainer:
             
             if self.args.dataset == "oxford_pets":
                 # local or API both use binary list accuracy
-                clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+                clean_acc = accuracy_calc_for_llm(llm_pred_labels if "_api" not in target else llm_pred_labels.reverse(), total_gt_labels)
                 print(f"preds binary: {llm_pred_labels}")
                 print(f"labels binary: {total_gt_labels}")
             else:
