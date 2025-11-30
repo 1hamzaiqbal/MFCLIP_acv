@@ -337,7 +337,7 @@ class AdversarialTrainer:
         self.load_model(model=self.surrogate, ckpts=self.surrogate_path)
         generator.train()
         criterion = nn.CrossEntropyLoss().to(self.device)
-        scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=int(num_epoch / 2), T_mult=1)
+        scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=max(1, int(num_epoch / 2)), T_mult=1)
         self.surrogate.eval().to(self.device)
         for epoch in range(num_epoch):
             train_acc = Accuracy()
