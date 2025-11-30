@@ -118,7 +118,7 @@ class AdversarialTrainer:
         #     self.args.num_epoch * len(loader),
         #     eta_min=1e-6
         # )
-        self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=int(num_epoch/2), T_mult=1)
+        self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=max(1, int(num_epoch/2)), T_mult=1)
         if self.use_bcewithlogits:
             print("Using BCEWithLogitsLoss for Sigmoid-based head.")
             self.criterion = nn.BCEWithLogitsLoss().to(self.device)
