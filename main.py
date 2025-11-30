@@ -484,7 +484,6 @@ class AdversarialTrainer:
                 else:
                     print(f"llm preds: {llm_pred_labels}")
                     print(f"labels: {total_gt_labels}")
-                    llm_pred_labels = list(reversed(llm_pred_labels))
                     adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             # ---------------------- CLEAN ACC ----------------------
@@ -542,7 +541,6 @@ class AdversarialTrainer:
                 else:
                     print(f"llm preds: {llm_pred_labels}")
                     print(f"labels: {total_gt_labels}")
-                    llm_pred_labels = list(reversed(llm_pred_labels))
                     clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             print(
