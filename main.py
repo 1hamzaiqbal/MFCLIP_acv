@@ -23,7 +23,7 @@ from model import UNetLikeGenerator as UNet
 ##HL Imports
 import matplotlib.pyplot as plt
 import math
-from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, parse_list, accuracy_calc_for_llm
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, parse_list, accuracy_calc_for_llm, oxford_pets_to_binary
 import torchvision.transforms.functional as TF
 from PIL import Image
 import tempfile
@@ -413,7 +413,7 @@ class AdversarialTrainer:
         
 
         if self.args.dataset == "oxford_pets":
-            total_gt_labels = [self.oxford_pets_to_binary(x) for x in total_gt_labels]
+            total_gt_labels = [oxford_pets_to_binary(x) for x in total_gt_labels]
         # -----------------------------
         # Now evaluate targets on limited set
         # -----------------------------
@@ -447,7 +447,7 @@ class AdversarialTrainer:
                     preds_37 = self.llm_predict_batch(images).detach().cpu().tolist()
 
                     if self.args.dataset == "oxford_pets":
-                        preds_binary = [self.oxford_pets_to_binary(p) for p in preds_37]
+                        preds_binary = [oxford_pets_to_binary(p) for p in preds_37]
                         llm_pred_labels.extend(preds_binary)
                     else:
                         llm_pred_labels.extend(preds_37)
@@ -459,7 +459,7 @@ class AdversarialTrainer:
                         if self.args.dataset == "oxford_pets":
                             # Local model → binary mapping
                             preds_37 = torch.argmax(logits, dim=1)
-                            preds_binary = [self.oxford_pets_to_binary(p.item()) for p in preds_37]
+                            preds_binary = [oxford_pets_to_binary(p.item()) for p in preds_37]
                             llm_pred_labels.extend(preds_binary)
                         else:
                             # Normal multiclass eval
@@ -494,7 +494,7 @@ class AdversarialTrainer:
                     preds_37 = self.llm_predict_batch(images).detach().cpu().tolist()
 
                     if self.args.dataset == "oxford_pets":
-                        preds_binary = [self.oxford_pets_to_binary(p) for p in preds_37]
+                        preds_binary = [oxford_pets_to_binary(p) for p in preds_37]
                         llm_pred_labels.extend(preds_binary)
                     else:
                         llm_pred_labels.extend(preds_37)
@@ -505,7 +505,7 @@ class AdversarialTrainer:
 
                         if self.args.dataset == "oxford_pets":
                             preds_37 = torch.argmax(logits, dim=1)
-                            preds_binary = [self.oxford_pets_to_binary(p.item()) for p in preds_37]
+                            preds_binary = [oxford_pets_to_binary(p.item()) for p in preds_37]
                             llm_pred_labels.extend(preds_binary)
                         else:
                             acc.update((logits, labels))
