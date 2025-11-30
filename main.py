@@ -1,6 +1,9 @@
 import argparse
 import torch
+import argparse
+import torch
 import os
+import json
 
 from dass.utils import setup_logger, set_random_seed, collect_env_info
 from dass.config import get_cfg_default
@@ -339,6 +342,7 @@ class AdversarialTrainer:
         criterion = nn.CrossEntropyLoss().to(self.device)
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=max(1, int(num_epoch / 2)), T_mult=1)
         self.surrogate.eval().to(self.device)
+        history = {'epoch': [], 'acc': [], 'loss': []}
         for epoch in range(num_epoch):
             train_acc = Accuracy()
             total_loss = 0
@@ -362,8 +366,21 @@ class AdversarialTrainer:
             scheduler.step()
 
             # return train_acc, total_loss / len(loader)
-            print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {total_loss / len(loader):.6f}')
+            epoch_acc = train_acc.compute()
+            epoch_loss = total_loss / len(loader)
+            print(f'Epoch: {epoch}, train acc: {epoch_acc:.4f}, loss: {epoch_loss:.6f}')
+            
+            history['epoch'].append(epoch)
+            history['acc'].append(epoch_acc)
+            history['loss'].append(epoch_loss)
+
         self.save_model(generator, f'{self.root}/{args.dataset}/{ckpt_name}')
+        
+        # Save history
+        history_path = f'{self.root}/{args.dataset}/{ckpt_name.replace(".pt", "_history.json")}'
+        with open(history_path, 'w') as f:
+            json.dump(history, f)
+        print(f"Saved training history to {history_path}")
 
     def run(self):
         if self.args.flag == 'finetune':
