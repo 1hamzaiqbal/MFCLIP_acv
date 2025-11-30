@@ -279,7 +279,6 @@ class AdversarialTrainer:
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
                 pil_img.save(f.name)
                 b64_img = encode_image_to_base64(f.name)
-                print(f"img encoded len: {b64_img} | fname: {f.name}")
                 encoded_images.append(b64_img)
 
         # Load prompts
@@ -390,6 +389,7 @@ class AdversarialTrainer:
         for batch in loader:
             images = batch['img'].to(self.device)
             labels = batch['label'].to(self.device)
+            print(labels)
             bsz = images.size(0)
 
             if filled + bsz > limit:
@@ -433,8 +433,7 @@ class AdversarialTrainer:
                 labels = adv_labels[start_idx:end_idx].to(self.device)
 
                 if "_api" in target:
-                    preds = self.llm_predict_batch(images)
-                    outputs = F.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
+                    outputs = self.llm_predict_batch(images)
                 else:
                     with torch.no_grad():
                         outputs = model(images)
@@ -458,8 +457,7 @@ class AdversarialTrainer:
                     labels = labels[:bsz]
 
                 if "_api" in target:
-                    preds = self.llm_predict_batch(images)
-                    outputs = F.one_hot(preds, num_classes=self.trainer.dm.num_classes).float()
+                    outputs = self.llm_predict_batch(images)
                 else:
                     with torch.no_grad():
                         outputs = model(images)
