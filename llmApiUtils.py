@@ -11,6 +11,11 @@ def accuracy_calc_for_llm(preds, labels):
     correct = sum(1 for p, gt in zip(preds, labels) if p == gt)
     return correct / len(labels)
 
+def oxford_pets_to_binary(self, idx):
+    """Convert 1–37 class index → 0 (cat) or 1 (dog)."""
+    idx = int(idx)
+    return 0 if 1 <= idx <= 12 else 1
+
 
 def encode_image_to_base64(image_path):
     with open(image_path, "rb") as image_file:

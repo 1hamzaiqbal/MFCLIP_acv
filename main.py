@@ -410,13 +410,17 @@ class AdversarialTrainer:
 
             if filled >= limit:
                 break
+        
 
+        if self.args.dataset == "oxford_pets":
+            total_gt_labels = [self.oxford_pets_to_binary(x) for x in total_gt_labels]
         # -----------------------------
         # Now evaluate targets on limited set
         # -----------------------------
         targets = ["rn18", "eff", "regnet", "qwen_api"]
         print(f"gt labels: {total_gt_labels}")
         for target in targets:
+            llm_pred_labels = []     # reset for this model & for ADV
             if "_api" not in target:
                 self.setup_target(name=target)
                 self.load_model(self.target, f'{self.root}/{self.args.dataset}/{target}.pt')
@@ -435,19 +439,41 @@ class AdversarialTrainer:
                 images = adv_examples[start_idx:end_idx].to(self.device)
                 labels = adv_labels[start_idx:end_idx].to(self.device)
 
+                # ==========================================================
+                #   Oxford Pets → apply BINARY mapping (cat=0, dog=1)
+                #   Other datasets → fall back to normal multiclass behavior
+                # ==========================================================
                 if "_api" in target:
-                    outputs = self.llm_predict_batch(images)
-                    llm_pred_labels.extend(outputs)
+                    preds_37 = self.llm_predict_batch(images).detach().cpu().tolist()
+
+                    if self.args.dataset == "oxford_pets":
+                        preds_binary = [self.oxford_pets_to_binary(p) for p in preds_37]
+                        llm_pred_labels.extend(preds_binary)
+                    else:
+                        llm_pred_labels.extend(preds_37)
 
                 else:
                     with torch.no_grad():
-                        outputs = model(images)
-                        acc.update((outputs, labels))
+                        logits = model(images)
 
-            if "_api" not in target:
-                adv_acc = acc.compute()
-            else:
+                        if self.args.dataset == "oxford_pets":
+                            # Local model → binary mapping
+                            preds_37 = torch.argmax(logits, dim=1)
+                            preds_binary = [self.oxford_pets_to_binary(p.item()) for p in preds_37]
+                            llm_pred_labels.extend(preds_binary)
+                        else:
+                            # Normal multiclass eval
+                            acc.update((logits, labels))
+
+            if self.args.dataset == "oxford_pets":
+                # local or API both use binary list accuracy
                 adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+            else:
+                # multiclass local model uses Ignite, API uses list accuracy
+                if "_api" not in target:
+                    adv_acc = acc.compute()
+                else:
+                    adv_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             # ---------------------- CLEAN ACC ----------------------
             acc = Accuracy()
@@ -465,22 +491,39 @@ class AdversarialTrainer:
                     labels = labels[:bsz]
 
                 if "_api" in target:
-                    outputs = self.llm_predict_batch(images)
-                    llm_pred_labels.extend(outputs)
+                    preds_37 = self.llm_predict_batch(images).detach().cpu().tolist()
+
+                    if self.args.dataset == "oxford_pets":
+                        preds_binary = [self.oxford_pets_to_binary(p) for p in preds_37]
+                        llm_pred_labels.extend(preds_binary)
+                    else:
+                        llm_pred_labels.extend(preds_37)
+
                 else:
                     with torch.no_grad():
-                        outputs = model(images)
+                        logits = model(images)
 
-                        acc.update((outputs, labels))
+                        if self.args.dataset == "oxford_pets":
+                            preds_37 = torch.argmax(logits, dim=1)
+                            preds_binary = [self.oxford_pets_to_binary(p.item()) for p in preds_37]
+                            llm_pred_labels.extend(preds_binary)
+                        else:
+                            acc.update((logits, labels))
+
                 filled += bsz
 
                 if filled >= limit:
                     break
             
-            if "_api" not in target:
-                clean_acc = acc.compute()
-            else:
+            if self.args.dataset == "oxford_pets":
+                # local or API both use binary list accuracy
                 clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
+            else:
+                # multiclass local model uses Ignite, API uses list accuracy
+                if "_api" not in target:
+                    clean_acc = acc.compute()
+                else:
+                    clean_acc = accuracy_calc_for_llm(llm_pred_labels, total_gt_labels)
 
             print(
                 f'attack:{self.args.attack}, dataset:{self.args.dataset}, target:{target}, '
