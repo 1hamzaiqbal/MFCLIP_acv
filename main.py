@@ -303,7 +303,7 @@ class AdversarialTrainer:
             pil_img = TF.to_pil_image(img.cpu())
             with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
                 pil_img.save(f.name)
-                pred_idx = classify_image_qwen(f.name, dataset_name=self.dataset_name, openrouter_api_key=self.openrouter_api_key)
+                pred_idx = classify_image_qwen(f.name, dataset_name=args.dataset, openrouter_api_key=self.openrouter_api_key)
             
             if pred_idx is None:
                 pred_idx = -1   # or a default
@@ -338,7 +338,8 @@ class AdversarialTrainer:
         # adv_pth = {'images': adv_examples, 'labels': adv_labels}
         # torch.save(adv_pth, self.adv_path)
 
-        targets = ["rn18", "eff", "regnet", "qwen_api"]
+        targets = ["qwen_api"]
+
         for target in targets:
             #HL Mod: don't call setup_target and model init if using api call
             if "_api" not in target:
