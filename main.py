@@ -215,7 +215,7 @@ class AdversarialTrainer:
         # adv_pth = {'images': adv_examples, 'labels': adv_labels}
         # torch.save(adv_pth, self.adv_path)
 
-        targets = ["rn18"]
+        targets = ["rn18", "eff", "regnet"]
         for target in targets:
             self.setup_target(name=target)
             self.load_model(model=self.target,
