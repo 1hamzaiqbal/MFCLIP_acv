@@ -23,10 +23,14 @@ from model import UNetLikeGenerator as UNet
 ##HL Imports
 import matplotlib.pyplot as plt
 import math
-from llmApiUtils import classify_image_qwen
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset
 import torchvision.transforms.functional as TF
 from PIL import Image
 import tempfile
+from pathlib import Path
+import requests
+import json
+import base64
 
 
 # custom
@@ -296,21 +300,72 @@ class AdversarialTrainer:
         images_tensor: (B, 3, 224, 224) in [0,1]
         Returns: tensor of predicted class indices (B,)
         """
-        preds = []
 
+        B = images_tensor.size(0)
+        encoded_images = []
+
+        # --- encode batch of images ---
         for img in images_tensor:
-            # convert tensor → PIL → temporary file
             pil_img = TF.to_pil_image(img.cpu())
-            with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
                 pil_img.save(f.name)
-                pred_idx = classify_image_qwen(f.name, dataset_name=args.dataset, openrouter_api_key=self.openrouter_api_key)
-            
-            if pred_idx is None:
-                pred_idx = -1   # or a default
-            
-            preds.append(pred_idx)
+                encoded_images.append(self.encode_image_to_base64(f.name))
 
-        return torch.tensor(preds, dtype=torch.int64, device=self.device)
+        # Load prompts
+        system_prompt, user_prompt = load_prompts_for_dataset(self.dataset_name)
+
+        # Build content list: text + N images
+        content_list = [
+            {"type": "text", "text": user_prompt},
+        ]
+        for b64 in encoded_images:
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+            })
+
+        # Force JSON output list
+        user_prompt += "\nReturn a JSON list of integers, one per image, in order. Only output JSON."
+
+        payload = {
+            "model": "qwen/qwen3-vl-30b-a3b-instruct",
+            "temperature": 0,
+            "max_tokens": 50,        # enough for 128 ints
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": content_list}
+            ]
+        }
+
+        # Call API
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=self.openrouter_headers,
+            json=payload
+        )
+
+        response_json = response.json()
+
+        # Extract output
+        raw_text = response_json["choices"][0]["message"]["content"].strip()
+
+        # Parse JSON list safely
+        try:
+            preds = json.loads(raw_text)
+        except:
+            print("LLM returned invalid JSON:", raw_text)
+            # fallback: fill with -1
+            preds = [-1] * B
+
+        # Convert to tensor
+        preds = torch.tensor(preds, dtype=torch.long, device=self.device)
+        if preds.size(0) != B:
+            print("WARNING: LLM returned wrong batch size")
+            preds = preds[:B]
+
+        return preds
+    
+    
     
     def eval_adv(self, batch_size):
         unet = UNet().to(self.device)
