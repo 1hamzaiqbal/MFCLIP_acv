@@ -1,0 +1,1 @@
+Which class index (1–102) is this flower? Return only the number.
