@@ -338,7 +338,7 @@ class AdversarialTrainer:
         # adv_pth = {'images': adv_examples, 'labels': adv_labels}
         # torch.save(adv_pth, self.adv_path)
 
-        targets = ["qwen_api"]
+        targets = ["rn18", "eff", "regnet", "qwen_api"]
 
         for target in targets:
             #HL Mod: don't call setup_target and model init if using api call
