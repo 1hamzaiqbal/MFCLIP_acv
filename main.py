@@ -587,6 +587,11 @@ class AdversarialTrainer:
 
     def train_unet(self, num_epoch=90):
         print(f"unet will be saved as: {self.root}/{args.dataset}/{args.head}_unet.pt")
+        if self.args.contrastive:
+            print("Using contrastive generator loss!")
+        else:
+            print("Using regular generator loss!")
+
         unet = UNet().to(self.device)
         loader = self.mf_loader
         optimizer = optim.AdamW(unet.parameters(), lr=1e-4)
@@ -602,14 +607,24 @@ class AdversarialTrainer:
                 images = batch['img'].to(self.device)
                 labels = batch['label'].to(self.device)
                 optimizer.zero_grad()
-
+                
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
-                outputs = self.surrogate(images_adv, labels)
+                
+                ##HL mod: swtich between contrastive vs regular generator loss
+                if self.args.contrastive:
+                    adv_feats, outputs = self.surrogate(images_adv, labels, return_features=True)
+                    img_feats, _ = self.surrogate(images, labels, return_features=True)
 
-                loss = 10 - criterion(outputs, labels)
+                    loss = torch.cosine_similarity((adv_feats).reshape(adv_feats.shape[0], -1), 
+                        (img_feats).reshape(img_feats.shape[0], -1)).mean()
+                else:
+                    outputs = self.surrogate(images_adv, labels)
+
+                    loss = 10 - criterion(outputs, labels)
+
                 loss.backward()
                 optimizer.step()
 
@@ -720,6 +735,9 @@ if __name__ == "__main__":
     
     parser.add_argument("--usellms", action="store_true",
                         help="Include LLM-based eval targets")
+    
+    parser.add_argument("--contrastive", action="store_true",
+                        help="use contrastive loss to train generators")
 
 
     parser.add_argument(
