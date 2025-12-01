@@ -718,7 +718,7 @@ if __name__ == "__main__":
     parser.add_argument("--inferlimit", type=int, default=None,
                     help="Limit number of images for UNet + LLM evaluation")
     
-    parser.add_argument("--use-llms", action="store_true",
+    parser.add_argument("--usellms", action="store_true",
                         help="Include LLM-based eval targets")
 
 
