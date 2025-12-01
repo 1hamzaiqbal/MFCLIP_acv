@@ -371,7 +371,7 @@ class AdversarialTrainer:
         # Load UNet attack
         # -----------------------------
         unet = UNet().to(self.device)
-        ckpt = torch.load(f'{self.root}/{self.args.dataset}/unet.pt', map_location='cpu')
+        ckpt = torch.load(f'{self.root}/{self.args.dataset}/{self.args.head}_unet.pt' if self.args.head != "ArcFace" else f'{self.root}/{self.args.dataset}/unet.pt', map_location='cpu')
         unet.load_state_dict(ckpt)
         unet.eval()
 
