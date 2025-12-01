@@ -634,7 +634,7 @@ class AdversarialTrainer:
 
             # return train_acc, total_loss / len(loader)
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {total_loss / len(loader):.6f}')
-        self.save_model(unet, f'{self.root}/{args.dataset}/{args.head}_unet.pt')
+        self.save_model(unet, f'{self.root}/{args.dataset}/{args.head}_{'contrastive' if self.args.contrastive else ''}_unet.pt')
 
     def run(self):
         if self.args.flag == 'finetune':
