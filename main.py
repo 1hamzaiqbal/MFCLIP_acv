@@ -326,6 +326,19 @@ class AdversarialTrainer:
         return images
 
     def train_unet(self, num_epoch=90):
+        # Handle loss_mode argument to set targeted/contrastive flags
+        if hasattr(self.args, 'loss_mode') and self.args.loss_mode:
+            if self.args.loss_mode == 'targeted_only':
+                self.args.targeted = True
+                self.args.contrastive = False
+            elif self.args.loss_mode == 'contrastive':
+                self.args.targeted = True
+                self.args.contrastive = True
+            elif self.args.loss_mode == 'mixed':
+                self.args.targeted = True
+                self.args.contrastive = True
+                # mixed uses contrastive_weight which is already handled
+        
         if self.args.generator == 'unet':
             generator = UNet().to(self.device)
             ckpt_name = 'unet.pt'
@@ -334,18 +347,52 @@ class AdversarialTrainer:
             ckpt_name = 'vit_generator.pt'
         else:
             raise ValueError(f"Unknown generator: {self.args.generator}")
-            
-        loader = self.mf_loader
-        optimizer = optim.AdamW(generator.parameters(), lr=1e-4)
+        
+        # Determine checkpoint name based on loss mode
+        if hasattr(self.args, 'loss_mode') and self.args.loss_mode:
+            ckpt_name = f'vit_generator_{self.args.loss_mode}.pt'
+        
+        # FIX: Use train_loader_x for training (not mf_loader which uses test set!)
+        loader = self.train_loader
+        print(f"Training on {len(loader.dataset)} samples from TRAIN set")
+        
+        # Use provided learning rate
+        lr = self.args.lr if hasattr(self.args, 'lr') and self.args.lr else 1e-4
+        optimizer = optim.AdamW(generator.parameters(), lr=lr, weight_decay=1e-4)
+        
         self.load_model(model=self.surrogate, ckpts=self.surrogate_path)
         generator.train()
         criterion = nn.CrossEntropyLoss().to(self.device)
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=max(1, int(num_epoch / 2)), T_mult=1)
         self.surrogate.eval().to(self.device)
-        history = {'epoch': [], 'acc': [], 'loss': []}
+        
+        # Freeze surrogate to save memory
+        for param in self.surrogate.parameters():
+            param.requires_grad = False
+        
+        # Contrastive weight (for mixed mode)
+        contrastive_weight = getattr(self.args, 'contrastive_weight', 1.0)
+        
+        history = {'epoch': [], 'acc': [], 'loss': [], 'loss_target': [], 'loss_contrastive': []}
+        
+        print(f"\n=== Training Config ===")
+        print(f"Generator: {self.args.generator}")
+        print(f"Loss mode: {getattr(self.args, 'loss_mode', 'default')}")
+        print(f"Targeted: {self.args.targeted}")
+        print(f"Contrastive: {self.args.contrastive}")
+        print(f"Contrastive weight: {contrastive_weight}")
+        print(f"Batch size: {self.args.bs}")
+        print(f"Learning rate: {lr}")
+        print(f"Epochs: {num_epoch}")
+        print(f"Output: {self.root}/{args.dataset}/{ckpt_name}")
+        print("=" * 25 + "\n")
+        
         for epoch in range(num_epoch):
             train_acc = Accuracy()
             total_loss = 0
+            total_loss_target = 0
+            total_loss_contrastive = 0
+            
             for batch in loader:
                 images = batch['img'].to(self.device)
                 labels = batch['label'].to(self.device)
@@ -354,11 +401,8 @@ class AdversarialTrainer:
                 if self.args.targeted:
                     # Targeted Attack: Generate random target labels != true labels
                     target_labels = torch.randint(0, self.trainer.dm.num_classes, labels.shape).to(self.device)
-                    # Ensure target != label (simple retry or just accept collision for simplicity, 
-                    # but let's do a simple fix for collisions)
                     mask = (target_labels == labels)
                     target_labels[mask] = (target_labels[mask] + 1) % self.trainer.dm.num_classes
-                    
                     noise = generator(images, target_labels)
                 else:
                     noise = generator(images)
@@ -366,43 +410,64 @@ class AdversarialTrainer:
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
-                outputs = self.surrogate(images_adv, labels)
+                
+                # Use no_grad for surrogate forward to save memory
+                with torch.no_grad():
+                    outputs = self.surrogate(images_adv, labels)
+                
+                # Re-enable grad for outputs (detach and re-forward last layer if needed)
+                # Actually we need grad flow through generator, so outputs should be fine
+                # Let's recompute with grad enabled for the head only
+                feat_adv = self.surrogate.backbone(images_adv)
+                outputs = self.surrogate.head(feat_adv, labels)
 
                 if self.args.targeted:
-                    # Minimize loss w.r.t target label
-                    loss = criterion(outputs, target_labels)
+                    loss_target = criterion(outputs, target_labels)
                 else:
-                    # Maximize loss w.r.t true label (Untargeted)
-                    loss = 10 - criterion(outputs, labels)
+                    loss_target = 10 - criterion(outputs, labels)
+                
+                loss = loss_target
+                loss_contrastive_val = 0.0
                 
                 if self.args.contrastive:
                     # Feature Disruption: Maximize distance between clean and adv features
-                    # 1 - CosineSim(clean, adv) -> Minimize similarity
-                    feat_clean = self.surrogate.backbone(images)
-                    feat_adv = self.surrogate.backbone(images_adv)
+                    with torch.no_grad():
+                        feat_clean = self.surrogate.backbone(images)
+                    # feat_adv already computed above
                     loss_contrastive = 1 - F.cosine_similarity(feat_clean, feat_adv).mean()
-                    
-                    # Weighting factor (lambda) - hardcoded to 1.0 for now, or use args.ratio?
-                    # Let's use a fixed weight or reuse ratio if appropriate, but 1.0 is a good start.
-                    loss += loss_contrastive
+                    loss = loss_target + contrastive_weight * loss_contrastive
+                    loss_contrastive_val = loss_contrastive.item()
                     
                 loss.backward()
                 optimizer.step()
 
-                train_acc.update((outputs, labels))
+                train_acc.update((outputs.detach(), labels))
                 total_loss += loss.item()
+                total_loss_target += loss_target.item()
+                total_loss_contrastive += loss_contrastive_val
+                
             scheduler.step()
 
-            # return train_acc, total_loss / len(loader)
             epoch_acc = train_acc.compute()
             epoch_loss = total_loss / len(loader)
-            print(f'Epoch: {epoch}, train acc: {epoch_acc:.4f}, loss: {epoch_loss:.6f}')
+            epoch_loss_target = total_loss_target / len(loader)
+            epoch_loss_contrastive = total_loss_contrastive / len(loader)
+            
+            print(f'Epoch: {epoch:3d} | Acc: {epoch_acc:.4f} | Loss: {epoch_loss:.4f} | Target: {epoch_loss_target:.4f} | Contrastive: {epoch_loss_contrastive:.4f}')
             
             history['epoch'].append(epoch)
-            history['acc'].append(epoch_acc)
-            history['loss'].append(epoch_loss)
+            history['acc'].append(float(epoch_acc))
+            history['loss'].append(float(epoch_loss))
+            history['loss_target'].append(float(epoch_loss_target))
+            history['loss_contrastive'].append(float(epoch_loss_contrastive))
+            
+            # Save checkpoint every 50 epochs
+            if (epoch + 1) % 50 == 0:
+                self.save_model(generator, f'{self.root}/{args.dataset}/{ckpt_name}')
+                print(f"  -> Checkpoint saved at epoch {epoch+1}")
 
         self.save_model(generator, f'{self.root}/{args.dataset}/{ckpt_name}')
+        print(f"\nFinal model saved to {self.root}/{args.dataset}/{ckpt_name}")
         
         # Save history
         history_path = f'{self.root}/{args.dataset}/{ckpt_name.replace(".pt", "_history.json")}'
@@ -502,6 +567,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--contrastive", action="store_true", help="enable contrastive feature disruption loss"
+    )
+    parser.add_argument(
+        "--loss_mode", type=str, default="", 
+        choices=["", "targeted_only", "contrastive", "mixed"],
+        help="Loss mode: targeted_only, contrastive (full), or mixed (weighted)"
+    )
+    parser.add_argument(
+        "--contrastive_weight", type=float, default=1.0,
+        help="Weight for contrastive loss in mixed mode (default: 1.0)"
     )
     parser.add_argument(
         "opts",
