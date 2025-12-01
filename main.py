@@ -424,7 +424,7 @@ class AdversarialTrainer:
         # -----------------------------
         # Evaluate each target model
         # -----------------------------
-        targets = ["rn18", "eff", "regnet", "qwen_api"]
+        targets = ["rn18", "eff", "regnet", "qwen_api"] if self.args.usellms else ["rn18", "eff", "regnet"]
 
         for target in targets:
 
@@ -717,6 +717,10 @@ if __name__ == "__main__":
     ##HL addition: added limiter for inference
     parser.add_argument("--inferlimit", type=int, default=None,
                     help="Limit number of images for UNet + LLM evaluation")
+    
+    parser.add_argument("--use-llms", action="store_true",
+                        help="Include LLM-based eval targets")
+
 
     parser.add_argument(
         "opts",
