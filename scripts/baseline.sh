@@ -3,9 +3,10 @@
 export CUDA_VISIBLE_DEVICES=5
 # custom config
 
-DATA=/home/datasets/
+DATA=/content/drive/MyDrive/FL25Courses/CSE5619/adcv_proj_data/
 
-datasets=("oxford_flowers" "stanford_cars" "oxford_pets" "food101" "sun397" "eurosat" "ucf101")
+datasets=("oxford_pets")
+# datasets=("oxford_flowers" "stanford_cars" "oxford_pets" "food101" "sun397" "eurosat" "ucf101")
 attacks=('l2t' 'ags' 'sia' 'decowa' 'bsr' 'ilpd' 'mta' 'cwa')
 SEED=1
 
