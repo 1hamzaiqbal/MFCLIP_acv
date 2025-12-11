@@ -377,11 +377,12 @@ class AdversarialTrainer:
 
         loader = self.test_loader
 
+        adv_examples = torch.empty(size=[len(loader.dataset), 3, 224, 224])
+        adv_labels = torch.empty(size=[len(loader.dataset),])
+        gussian = transforms.GaussianBlur(17, 4).cuda()
         # -----------------------------
         # Pre-allocate tensors
         # -----------------------------
-        adv_examples = torch.empty(size=[limit, 3, 224, 224])
-        adv_labels   = torch.empty(size=[limit], dtype=torch.long)
 
         total_gt_labels_fine = []
         total_gt_labels_binary = []
@@ -392,6 +393,9 @@ class AdversarialTrainer:
         filled = 0
         for batch in loader:
             images = batch['img'].to(self.device)
+            img_low = gussian(images)
+            img_high = images - img_low
+
             labels = batch['label'].to(self.device)
 
             total_gt_labels_fine.extend(labels.cpu().tolist())
@@ -408,24 +412,20 @@ class AdversarialTrainer:
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
-                images_adv = torch.clamp(images + noise, 0, 1)
+                images_adv = images + noise
+                images_adv = torch.clamp(images_adv, 0, 1)
+                adv_low = gussian(images_adv)
+                adv_high = images_adv - adv_low
+                images_adv = adv_low + adv_high
 
-            adv_examples[filled:filled+bsz] = images_adv.cpu()
-            adv_labels[filled:filled+bsz]   = labels.cpu()
+            adv_examples[batch_idx * loader.batch_size:
+                         (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
+            adv_labels[batch_idx * loader.batch_size:
+                       (batch_idx + 1) * loader.batch_size] = labels.cpu()
+        # adv_pth = {'images': adv_examples, 'labels': adv_labels}
+        # torch.save(adv_pth, self.adv_path)
 
-            filled += bsz
-            if filled >= limit:
-                break
-
-        print("GT fine labels:", total_gt_labels_fine)
-        if self.args.dataset == "oxford_pets":
-            print("GT binary labels:", total_gt_labels_binary)
-
-        # -----------------------------
-        # Evaluate each target model
-        # -----------------------------
-        targets = ["rn18", "eff", "regnet", "qwen_api"] if self.args.usellms else ["rn18", "eff", "regnet"]
-
+        targets = ["rn18", "eff", "regnet"]
         for target in targets:
 
             print("\n=========================================")
@@ -613,18 +613,11 @@ class AdversarialTrainer:
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
-                
-                ##HL mod: swtich between contrastive vs regular generator loss
-                if self.args.contrastive:
-                    adv_feats, outputs = self.surrogate(images_adv, labels, return_features=True)
-                    img_feats, _ = self.surrogate(images, labels, return_features=True)
+                adv_feats, outputs = self.surrogate(images_adv, labels, return_features=True)
+                img_feats, _ = self.surrogate(images, labels, return_features=True)
 
-                    loss = torch.cosine_similarity((adv_feats).reshape(adv_feats.shape[0], -1), 
-                        (img_feats).reshape(img_feats.shape[0], -1)).mean()
-                else:
-                    outputs = self.surrogate(images_adv, labels)
-
-                    loss = 10 - criterion(outputs, labels)
+                loss = torch.cosine_similarity((adv_feats).reshape(adv_feats.shape[0], -1), 
+                    (img_feats).reshape(img_feats.shape[0], -1)).mean()
 
                 loss.backward()
                 optimizer.step()
