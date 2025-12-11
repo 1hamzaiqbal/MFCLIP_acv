@@ -1,3 +1,6 @@
+#72778 is default number of classes
+#37 for oxford pers
+
 AdaCos:
     feat_dim: 512
     num_class: 72778
@@ -74,3 +77,23 @@ ArcNegFace:
     num_class: 72778
     margin: 0.5
     scale: 64
+
+ArcFaceSigmoid:
+    feat_dim: 512
+    num_class: 37
+    margin_arc: 0.35
+    margin_am: 0.0
+    scale: 32
+
+SigLipHead:
+    feat_dim: 512
+    num_class: 37
+    scale: 16
+    temperature: 0.07
+
+
+HingeLossHead:
+    feat_dim: 512
+    num_class: 37
+    scale: 16
+    temperature: 0.07

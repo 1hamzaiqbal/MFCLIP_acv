@@ -20,6 +20,18 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, CosineAnnealin
 from utils.util import *
 from model import UNetLikeGenerator as UNet
 
+##HL Imports
+import matplotlib.pyplot as plt
+import math
+from llmApiUtils import classify_image_qwen, load_prompts_for_dataset, encode_image_to_base64, parse_list, accuracy_calc_for_llm, oxford_pets_to_binary
+import torchvision.transforms.functional as TF
+from PIL import Image
+import tempfile
+from pathlib import Path
+import requests
+import json
+import base64
+
 
 # custom
 import datasets.oxford_pets
@@ -54,6 +66,13 @@ class AdversarialTrainer:
         self.eps = args.eps
         self.surrogate_path = f'{self.root}/{args.dataset}/{args.surrogate}_{args.head}.pth'
         self.target_path = f'{self.root}/{args.dataset}/{args.target}.pt'
+        
+        ##HL addition for setting openrouter api key
+        self.openrouter_api_key = args.apikey
+        self.openrouter_headers = {"Authorization": f"Bearer {self.openrouter_api_key}", "Content-Type": "application/json"}
+
+        ##Hl addition for image path save
+        self.figure_save_path_root = f'{self.root}/{args.dataset}/{args.surrogate}_trainplot.png'
         if args.adv_training:
             self.target_path = f'{self.root}/{args.dataset}/{args.target}_adv.pt'
         self.adv_path = f'{self.root}/{args.dataset}/{args.surrogate}_{args.head}/{args.attack}.pth'
@@ -63,6 +82,11 @@ class AdversarialTrainer:
         self.setup_data()
         if args.attack == 'FGSM':
             self.num_iter = 1
+
+        ##HL Addition: toggle for swithcing between crossentropy loss and bcewithlogits loss (for sigmoid-based losses##
+        self.use_bcewithlogits = False if args.head.lower() not in ["sigliphead", "arcfacesigmoid"] else True
+        ##HL Addition: if using multiclasshingeloss, use this to control which criterion to use + set the margin val
+        self.hingeloss_margin = None if args.head.lower() not in ["hingelosshead"] else 1.0
 
     def ensure_dir(self):
         for file_path in [self.surrogate_path, self.target_path, self.adv_path]:
@@ -79,6 +103,11 @@ class AdversarialTrainer:
         backbone = self.trainer.clip_model.visual
         backbone = self.wrap_model(backbone)
         self.surrogate = Model(backbone, head_factory).to(self.device)
+        print(f"model architecture: \n\n {self.surrogate} \n\n")
+        print("Trainable parameters:")
+        for name, param in self.surrogate.named_parameters():
+            if param.requires_grad:
+                print(f"{name} | shape: {tuple(param.shape)}")
 
     def setup_target(self, name='rn18'):
         num_classes = self.trainer.dm.num_classes
@@ -111,7 +140,15 @@ class AdversarialTrainer:
         #     eta_min=1e-6
         # )
         self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=int(num_epoch/2), T_mult=1)
-        self.criterion = nn.CrossEntropyLoss().to(self.device)
+        if self.use_bcewithlogits:
+            print("Using BCEWithLogitsLoss for Sigmoid-based head.")
+            self.criterion = nn.BCEWithLogitsLoss().to(self.device)
+        elif self.hingeloss_margin is not None:
+            print(f"Using MultiClassHingeLoss for Hinge-loss head with margin {self.hingeloss_margin}.")
+            self.criterion = nn.MultiMarginLoss(margin=self.hingeloss_margin).to(self.device)
+        else:
+            print("Using CrossEntropyLoss for Softmax-based head.")
+            self.criterion = nn.CrossEntropyLoss().to(self.device)
 
     def wrap_model(self, model):
         normalize = transforms.Normalize([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711])
@@ -121,14 +158,43 @@ class AdversarialTrainer:
         )
 
     def finetune(self, num_epoch):
+        #HL Addition: dict for holding train epoch loss/acc
+        self.train_acc_loss = {}
         loader = self.mf_loader
+
+        ##TODO: also implement resume training for optimizer and scheduler states
+        ##HL Addition: need to implement resume training logic since authors have this flag set but no implementation##
+        if args.resume and len(args.resume)>0 and os.path.exists(args.resume):
+            print(f"Resuming from checkpoint: {args.resume}")
+            self.load_model(self.surrogate, args.resume)
+        ##End##
+        
         self.setup_optimization(model=self.surrogate, num_epoch=num_epoch, optimizer=args.optimizer, lr=args.lr)
         for epoch in range(num_epoch):
             train_acc = Accuracy()
             train_acc, loss = self.train_one_epoch(self.surrogate, train_acc, loader)
+            self.train_acc_loss[epoch] = [train_acc.compute(), loss]
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {loss:.6f}')
+
+        self.graph_train_loss_and_acc(self.train_acc_loss, self.figure_save_path_root)
         self.eval_one_epoch(self.surrogate, self.test_loader)
 
+
+    ##HL addition: function for graphing train loss and acc graphs
+    def graph_train_loss_and_acc(self, train_log: dict, out_path:str):
+        train_loss = [a[1] for a in train_log.values()]
+        train_acc = [a[0] for a in train_log.values()]
+        plt.figure(figsize=(8, 5))
+        plt.plot(train_log.keys(), train_acc, label=f"Train Accuracy")
+        plt.plot(train_log.keys(), train_loss, label=f"Train Loss", linestyle="--")
+        plt.xlabel("Epoch")
+        plt.ylabel("Training Accuracy and Loss")
+        plt.title("Training Accuracy and Loss over Epochs")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(out_path)
+        
     def train_scratch(self, num_epoch=90,):
         self.setup_target(self.target)
         loader = self.train_loader
@@ -155,7 +221,22 @@ class AdversarialTrainer:
                 outputs = model(images, labels)
             except TypeError:
                 outputs = model(images)
-            loss = self.criterion(outputs, labels)
+
+            ##HL addition: need to one-hot encode labels for bcewithlogits loss##
+
+            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                # Convert integer labels → one-hot for BCE
+                labels_onehot = F.one_hot(labels, num_classes=outputs.size(1)).float()
+                loss = self.criterion(outputs, labels_onehot)
+            else:
+                #hingeloss and crossentropy can use interger labels
+                loss = self.criterion(outputs, labels)
+
+            #old code:
+            # loss = self.criterion(outputs, labels)
+
+            ##end HL addition##
+
             loss.backward()
             self.optimizer.step()
 
@@ -180,73 +261,298 @@ class AdversarialTrainer:
                 acc.update((outputs, labels))
         print('eval acc: {:.4f}'.format(acc.compute()))
         return acc.compute()
+            
+    
+    ##HL Addition: helper for llm inference
+    def llm_predict_batch(self, images_tensor):
+        """
+        images_tensor: (B, 3, 224, 224) in [0,1]
+        Returns: tensor of predicted class indices (B,)
+        """
 
+        B = images_tensor.size(0)
+        encoded_images = []
+
+        # --- encode batch of images ---
+        for img in images_tensor:
+            pil_img = TF.to_pil_image(img.cpu())
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                pil_img.save(f.name)
+                b64_img = encode_image_to_base64(f.name)
+                encoded_images.append(b64_img)
+
+        # Load prompts
+        system_prompt, user_prompt = load_prompts_for_dataset(args.dataset)
+
+        # Append the JSON instruction BEFORE adding to content_list
+        user_prompt = (
+            user_prompt
+            + f"\nReturn ONLY a Python list of integers, one per image. For example: [1, 5, 12]. Make sure the number of items in the list matches the {B} images passed to you. Rember to properly open and close the list with [ and ]"
+        )
+
+        # Build content list: text + N images
+        content_list = [
+            {"type": "text", "text": user_prompt},
+        ]
+        for b64 in encoded_images:
+            content_list.append({
+            "type": "image_url",
+            "image_url": f"data:image/jpeg;base64,{b64}"
+            })
+
+        payload = {
+            "model": "qwen/qwen3-vl-30b-a3b-instruct",
+            "temperature": 0,
+            "max_tokens": 512,        # enough for 128 ints
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": content_list}
+            ]
+        }
+
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=self.openrouter_headers,
+            json=payload
+        )
+
+        # Validate response
+        try:
+            response_json = response.json()
+        except:
+            print("Invalid JSON from API:", response.text)
+            return torch.full((B,), -1, dtype=torch.long, device=self.device)
+
+        # Extract output
+        try:
+            raw_text = response_json["choices"][0]["message"]["content"].strip()
+        except:
+            print("Malformed response:", response_json)
+            return torch.full((B,), -1, dtype=torch.long, device=self.device)
+
+        preds = parse_list(raw_text, B)
+
+        # print(f"Raw text: {raw_text}")
+        # print(f"Parsed list: {preds}")
+
+        # Convert to tensor
+        preds = torch.tensor(preds, dtype=torch.long, device=self.device)
+
+        # Pad or trim to batch size
+        if preds.size(0) < B:
+            pad = torch.zeros((B - preds.size(0),), dtype=torch.long, device=self.device)
+            preds = torch.cat([preds, pad], dim=0)
+        elif preds.size(0) > B:
+            preds = preds[:B]
+
+        # Clamp invalid indices
+        num_classes = self.trainer.dm.num_classes
+        preds = torch.clamp(preds, 0, num_classes - 1)
+
+
+        return preds
+
+    
     def eval_adv(self, batch_size):
+
+        # -----------------------------
+        # Apply rate limit
+        # -----------------------------
+        limit = self.args.inferlimit
+        full_dataset_size = len(self.test_loader.dataset)
+
+        if limit is not None:
+            limit = min(limit, full_dataset_size)
+            print(f"[Rate Limit] Evaluating only first {limit} images out of {full_dataset_size}")
+        else:
+            limit = full_dataset_size
+
+        # -----------------------------
+        # Load UNet attack
+        # -----------------------------
         unet = UNet().to(self.device)
-        ckpt = torch.load(f'{self.root}/{args.dataset}/unet.pt', map_location='cpu')
+        ckpt = torch.load(f'{self.root}/{self.args.dataset}/{self.args.head}_unet.pt' if self.args.head != "ArcFace" else f'{self.root}/{self.args.dataset}/unet.pt', map_location='cpu')
         unet.load_state_dict(ckpt)
         unet.eval()
 
         loader = self.test_loader
 
-        adv_examples = torch.empty(size=[len(loader.dataset), 3, 224, 224])
-        adv_labels = torch.empty(size=[len(loader.dataset),])
+        # -----------------------------
+        # Pre-allocate tensors
+        # -----------------------------
+        adv_examples = torch.empty(size=[limit, 3, 224, 224])
+        adv_labels   = torch.empty(size=[limit], dtype=torch.long)
 
-        for batch_idx, batch in enumerate(loader):
+        total_gt_labels_fine = []
+        total_gt_labels_binary = []
+
+        # -----------------------------
+        # Generate adversarial examples
+        # -----------------------------
+        filled = 0
+        for batch in loader:
             images = batch['img'].to(self.device)
             labels = batch['label'].to(self.device)
+
+            total_gt_labels_fine.extend(labels.cpu().tolist())
+
+            if self.args.dataset == "oxford_pets":
+                total_gt_labels_binary.extend([oxford_pets_to_binary(x) for x in labels.cpu().tolist()])
+
+            bsz = images.size(0)
+            if filled + bsz > limit:
+                bsz = limit - filled
+                images = images[:bsz]
+                labels = labels[:bsz]
+
             with torch.no_grad():
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
-                images_adv = images + noise
-                images_adv = torch.clamp(images_adv, 0, 1)
-            adv_examples[batch_idx * loader.batch_size:
-                         (batch_idx + 1) * loader.batch_size] = images_adv.cpu()
-            adv_labels[batch_idx * loader.batch_size:
-                       (batch_idx + 1) * loader.batch_size] = labels.cpu()
-        # adv_pth = {'images': adv_examples, 'labels': adv_labels}
-        # torch.save(adv_pth, self.adv_path)
+                images_adv = torch.clamp(images + noise, 0, 1)
 
-        targets = ["rn18", "eff", "regnet"]
+            adv_examples[filled:filled+bsz] = images_adv.cpu()
+            adv_labels[filled:filled+bsz]   = labels.cpu()
+
+            filled += bsz
+            if filled >= limit:
+                break
+
+        print("GT fine labels:", total_gt_labels_fine)
+        if self.args.dataset == "oxford_pets":
+            print("GT binary labels:", total_gt_labels_binary)
+
+        # -----------------------------
+        # Evaluate each target model
+        # -----------------------------
+        targets = ["rn18", "eff", "regnet", "qwen_api"] if self.args.usellms else ["rn18", "eff", "regnet"]
+
         for target in targets:
-            self.setup_target(name=target)
-            self.load_model(model=self.target,
-                               ckpts=f'{self.root}/{args.dataset}/{target}.pt')
-            model = self.target
-            model.eval().cuda()
-            # adv_pth = torch.load(self.adv_path)
-            # images_array, labels_array = adv_pth['images'], adv_pth['labels']
-            images_array, labels_array = adv_examples, adv_labels
-            num_batches = (len(images_array) + batch_size - 1) // batch_size
 
-            acc = Accuracy()
+            print("\n=========================================")
+            print(f"Evaluating target = {target}")
+
+            is_api = ("_api" in target)
+            is_pets = (self.args.dataset == "oxford_pets")
+
+            # Load local model if needed
+            if not is_api:
+                self.setup_target(name=target)
+                self.load_model(self.target, f'{self.root}/{self.args.dataset}/{target}.pt')
+                model = self.target.eval().cuda()
+
+            # storage
+            adv_preds_fine = []
+            adv_preds_binary = []
+
+            clean_preds_fine = []
+            clean_preds_binary = []
+
+            num_batches = (limit + batch_size - 1) // batch_size
+
+            # ---------------------- ADV ACC ----------------------
+            acc_local_adv = Accuracy()
+
             for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min(start_idx + batch_size, len(images_array))
 
-                images = images_array[start_idx:end_idx].to(self.device)
-                labels = labels_array[start_idx:end_idx].to(self.device)
+                si = batch_idx * batch_size
+                ei = min(si + batch_size, limit)
 
-                with torch.no_grad():
-                    outputs = model(images)
-                    acc.update((outputs, labels))
-            adv_acc = acc.compute()
-            # return adv_acc
+                imgs = adv_examples[si:ei].to(self.device)
+                labels = adv_labels[si:ei].to(self.device)
 
-            acc = Accuracy()
+                if is_api:
+                    preds_fine = self.llm_predict_batch(imgs).detach().cpu().tolist()
+                    adv_preds_fine.extend(preds_fine)
+
+                    if is_pets:
+                        preds_binary = [oxford_pets_to_binary(x) for x in preds_fine]
+                        adv_preds_binary.extend(preds_binary)
+
+                else:
+                    with torch.no_grad():
+                        logits = model(imgs)
+                        acc_local_adv.update((logits, labels))
+
+                        if is_pets:
+                            preds_fine_local = torch.argmax(logits, dim=1).cpu().tolist()
+                            adv_preds_fine.extend(preds_fine_local)
+
+                            adv_preds_binary.extend([oxford_pets_to_binary(x) for x in preds_fine_local])
+            
+            # Fix reversed order only for pets API
+            if is_pets and is_api:
+                adv_preds_fine = list(reversed(adv_preds_fine))
+                adv_preds_binary = list(reversed(adv_preds_binary))
+
+            # Final adv accuracy
+            if is_api:
+                adv_acc_fine = accuracy_calc_for_llm(adv_preds_fine, total_gt_labels_fine)
+            else:
+                adv_acc_fine = acc_local_adv.compute()
+
+            if is_pets:
+                adv_acc_binary = accuracy_calc_for_llm(adv_preds_binary, total_gt_labels_binary)
+
+            # ---------------------- CLEAN ACC ----------------------
+            acc_local_clean = Accuracy()
+
+            filled = 0
             for batch in loader:
-                images = batch['img'].cuda()
-                labels = batch['label'].cuda()
 
-                with torch.no_grad():
-                    outputs = model(images)
-                    acc.update((outputs, labels))
-            clean_acc = acc.compute()
-            print(
-                f'attack:{args.attack}, dataset:{args.dataset}, target:{target}, ASR: {clean_acc - adv_acc:.4f}, clean: {clean_acc:.4f}, adv: {adv_acc:.4f}')
-            # print('----------------------------------------------------------')
-            # print('eval acc: {:.4f}'.format(acc.compute()))
-            # return acc.compute()
+                imgs = batch['img'].cuda()
+                labels = batch['label'].cuda()
+                bsz = imgs.size(0)
+
+                if filled + bsz > limit:
+                    bsz = limit - filled
+                    imgs = imgs[:bsz]
+                    labels = labels[:bsz]
+
+                if is_api:
+                    preds_fine = self.llm_predict_batch(imgs).detach().cpu().tolist()
+                    clean_preds_fine.extend(preds_fine)
+
+                    if is_pets:
+                        clean_preds_binary.extend([oxford_pets_to_binary(x) for x in preds_fine])
+
+                else:
+                    with torch.no_grad():
+                        logits = model(imgs)
+                        acc_local_clean.update((logits, labels))
+
+                        if is_pets:
+                            preds_fine_local = torch.argmax(logits, dim=1).cpu().tolist()
+                            clean_preds_fine.extend(preds_fine_local)
+                            clean_preds_binary.extend([oxford_pets_to_binary(x) for x in preds_fine_local])
+
+                filled += bsz
+                if filled >= limit:
+                    break
+
+            # Fix order only for pets API
+            if is_pets and is_api:
+                clean_preds_fine = list(reversed(clean_preds_fine))
+                clean_preds_binary = list(reversed(clean_preds_binary))
+
+            # clean accuracy
+            if is_api:
+                clean_acc_fine = accuracy_calc_for_llm(clean_preds_fine, total_gt_labels_fine)
+            else:
+                clean_acc_fine = acc_local_clean.compute()
+
+            if is_pets:
+                clean_acc_binary = accuracy_calc_for_llm(clean_preds_binary, total_gt_labels_binary)
+
+            # -----------------------------
+            # Print results
+            # -----------------------------
+            print(f"[Fine 37-class]  ASR: {clean_acc_fine - adv_acc_fine:.4f}, clean: {clean_acc_fine:.4f}, adv: {adv_acc_fine:.4f}")
+
+            if is_pets:
+                print(f"[Binary cat/dog] ASR: {clean_acc_binary - adv_acc_binary:.4f}, clean: {clean_acc_binary:.4f}, adv: {adv_acc_binary:.4f}")
+
+
+
 
     def save_model(self, model, ckpts):
         torch.save(model.state_dict(), ckpts)
@@ -280,6 +586,13 @@ class AdversarialTrainer:
         return images
 
     def train_unet(self, num_epoch=90):
+        unet_save_name = f"{self.root}/{args.dataset}/{args.head}_{'contrastive' if self.args.contrastive else ''}_unet.pt"
+        print(f"unet will be saved as: {unet_save_name}")
+        if self.args.contrastive:
+            print("Using contrastive generator loss!")
+        else:
+            print("Using regular generator loss!")
+
         unet = UNet().to(self.device)
         loader = self.mf_loader
         optimizer = optim.AdamW(unet.parameters(), lr=1e-4)
@@ -295,14 +608,24 @@ class AdversarialTrainer:
                 images = batch['img'].to(self.device)
                 labels = batch['label'].to(self.device)
                 optimizer.zero_grad()
-
+                
                 noise = unet(images)
                 noise = torch.clamp(noise, -self.eps/255., self.eps/255.)
                 images_adv = images + noise
                 images_adv = torch.clamp(images_adv, 0, 1)
-                outputs = self.surrogate(images_adv, labels)
+                
+                ##HL mod: swtich between contrastive vs regular generator loss
+                if self.args.contrastive:
+                    adv_feats, outputs = self.surrogate(images_adv, labels, return_features=True)
+                    img_feats, _ = self.surrogate(images, labels, return_features=True)
 
-                loss = 10 - criterion(outputs, labels)
+                    loss = torch.cosine_similarity((adv_feats).reshape(adv_feats.shape[0], -1), 
+                        (img_feats).reshape(img_feats.shape[0], -1)).mean()
+                else:
+                    outputs = self.surrogate(images_adv, labels)
+
+                    loss = 10 - criterion(outputs, labels)
+
                 loss.backward()
                 optimizer.step()
 
@@ -312,7 +635,7 @@ class AdversarialTrainer:
 
             # return train_acc, total_loss / len(loader)
             print(f'Epoch: {epoch}, train acc: {train_acc.compute():.4f}, loss: {total_loss / len(loader):.6f}')
-        self.save_model(unet, f'{self.root}/{args.dataset}/unet.pt')
+        self.save_model(unet, f'{unet_save_name}')
 
     def run(self):
         if self.args.flag == 'finetune':
@@ -327,7 +650,9 @@ class AdversarialTrainer:
             self.setup_surrogate()
             self.train_unet(num_epoch=args.num_epoch)
         elif self.args.flag == 'eval_adv':
-            self.eval_adv(batch_size=512)
+            # self.eval_adv(batch_size=512)
+            ##HL mod: DO NOT USE 512 BS SINCE WE USING LLM APIS
+            self.eval_adv(batch_size=args.bs)
         else:
             raise NameError
 
@@ -398,11 +723,30 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-train", action="store_true", help="do not call trainer.train()"
     )
+
+    #HL addition for openrouter api key arg
+    parser.add_argument(
+        "--apikey",
+        default=None,
+        type=str
+    )
+    ##HL addition: added limiter for inference
+    parser.add_argument("--inferlimit", type=int, default=None,
+                    help="Limit number of images for UNet + LLM evaluation")
+    
+    parser.add_argument("--usellms", action="store_true",
+                        help="Include LLM-based eval targets")
+    
+    parser.add_argument("--contrastive", action="store_true",
+                        help="use contrastive loss to train generators")
+
+
     parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
+
     args = parser.parse_args()
     main(args)
